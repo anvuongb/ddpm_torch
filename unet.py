@@ -2,9 +2,44 @@ import torch
 import torch.nn as nn
 import torch.functional as F
 import numpy as np
+from torchvision.transforms import Resize
 
 
 # TODO: implement temporal unet
+
+class DownSampleBlock(nn.Module):
+    def __init__(self):
+        super(DownSampleBlock, self).__init__()
+
+    def forward(self, x, use_conv=True):
+        N, C, H, W = x.shape
+        if use_conv:
+            down = nn.Conv2d(in_channels=C, out_channels=C, kernel_size=3, stride=2)
+        else:
+            down = nn.AvgPool2d(kernel_size=2, stride=2)
+        x = down(x)
+
+        assert x.shape[2] == H//2
+        assert x.shape[3] == W//2
+
+        return x
+
+class UpSampleBlock(nn.Module):
+    def __init__(self):
+        super(UpSampleBlock, self).__init__()
+
+    def forward(self, x, use_conv=True):
+        N, C, H, W = x.shape
+        resize = Resize((H*2, W*2))
+        x = resize(x)
+        if use_conv:
+            conv = nn.Conv2d(in_channels=C, out_channels=C, kernel_size=3, stride=1)
+            x = conv(x)
+
+        assert x.shape[2] == H*2
+        assert x.shape[3] == W*2
+
+        return x
 class SelfAttentionBlock(nn.Module):
     def __init__(self, embed_size=512, num_heads=8):
         super(SelfAttentionBlock, self).__init__()
