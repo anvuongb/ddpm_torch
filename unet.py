@@ -224,7 +224,7 @@ class UNet(nn.Module):
             block_dim_in = self.init_channels * in_channels_multipliers[i]
             block_dim_out = self.init_channels * self.channels_multipliers[i]
             for _ in range(self.num_res_blocks):
-                res_blocks.append(ResidualBlock(block_dim_in, block_dim_out))
+                res_blocks.append(ResidualBlock(block_dim_in, block_dim_out, self.time_emb_size))
                 block_dim_in = block_dim_out
                 if current_res in attn_resolutions:
                     attn_blocks.append(SelfAttentionBlock(block_dim_in, 1))
