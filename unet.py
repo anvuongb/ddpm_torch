@@ -109,8 +109,8 @@ class SelfAttentionBlock(nn.Module):
 
 class ResidualBlock(nn.Module):
     def __init__(self, in_channels, out_channels, time_embedding_dim, stride=1):
-        self.time_mlp = nn.Linear(time_embedding_dim, out_channels)
         super(ResidualBlock, self).__init__()
+        self.time_mlp = nn.Linear(time_embedding_dim, out_channels)
         self.conv1 = nn.Sequential(
             nn.Conv2d(
                 in_channels=in_channels,
@@ -135,15 +135,19 @@ class ResidualBlock(nn.Module):
         )
         self.relu = nn.ReLU()
         self.out_channesl = out_channels
-        # self.batch_norm_1 = nn.BatchNorm2d(out_channels)
-        # self.batch_norm_2 = nn.BatchNorm2d(out_channels)
+        self.batch_norm_1 = nn.BatchNorm2d(out_channels)
+        self.batch_norm_2 = nn.BatchNorm2d(out_channels)
 
     def forward(self, x, t_emb):
-        # TODO: 
-        # add normalization
-        # add time dimension between conv1 and conv2
+        t_emb = self.time_mlp(t_emb)
+        
         residual = x 
+        x = self.batch_norm_1(x)
         x = self.conv1(x)
+
+        x = x + t_emb[:, None, None]
+
+        x = self.batch_norm_2(x)
         x = self.conv2(x)
         x += residual
         x = self.relu(x)
@@ -238,11 +242,11 @@ class UNet(nn.Module):
         self.middle.res_block_1 = ResidualBlock()
 
 if __name__ == "__main__":
-    # model = ResidualBlock(32, 32).to("cpu")
-    # total_params = sum([p.numel() for p in model.parameters()])
-    # print("Total parameters = ", total_params)
-    # for name, param in model.state_dict().items():
-    #     print(name, param.size())
+    model = ResidualBlock(32, 32, 512).to("cpu")
+    total_params = sum([p.numel() for p in model.parameters()])
+    print("Total parameters = ", total_params)
+    for name, param in model.state_dict().items():
+        print(name, param.size())
 
     # model = SelfAttentionBlock(128, 2).to("cpu")
     # total_params = sum([p.numel() for p in model.parameters()])
@@ -250,12 +254,12 @@ if __name__ == "__main__":
     # for name, param in model.state_dict().items():
     #     print(name, param.size())
 
-    test = torch.randn(size=(8, 32, 256, 256))
-    downsample = DownSampleBlock(channels=32, use_conv=True)
-    test = downsample(test)
-    print(test.shape)
+    # test = torch.randn(size=(8, 32, 256, 256))
+    # downsample = DownSampleBlock(channels=32, use_conv=True)
+    # test = downsample(test)
+    # print(test.shape)
 
-    test = torch.randn(size=(8, 32, 128, 128))
-    upsample = UpSampleBlock(channels=32, use_conv=True)
-    test = upsample(test)
-    print(test.shape)
+    # test = torch.randn(size=(8, 32, 128, 128))
+    # upsample = UpSampleBlock(channels=32, use_conv=True)
+    # test = upsample(test)
+    # print(test.shape)
