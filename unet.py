@@ -189,7 +189,7 @@ class UNet(nn.Module):
         self.time_emb_size = self.init_channels * 4
         self.in_channels = in_channels
         self.out_channels = out_channels
-        self.num_res_self.locks = num_res_blocks
+        self.num_res_blocks = num_res_blocks
         self.attn_resolutions = attn_resolutions
         self.input_img_resolution = input_img_resolution
         self.channels_multipliers = channels_multipliers
@@ -235,8 +235,10 @@ class UNet(nn.Module):
             self.down.append(level_objects)
 
         # STAGE 2: Middle
+        # TODO: finish this stage
         self.middle = nn.Module()
         self.middle.res_block_1 = ResidualBlock()
+
 if __name__ == "__main__":
     # model = ResidualBlock(32, 32).to("cpu")
     # total_params = sum([p.numel() for p in model.parameters()])
