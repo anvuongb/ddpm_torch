@@ -166,11 +166,6 @@ class SinusoidalPositionalEmbedding(nn.Module):
         embeddings = torch.cat([embeddings.sin(), embeddings.cos()], dim=-1)
         return embeddings
 
-class StageObject:
-    def __init__(self):
-        self.res_blocks = None
-        self.attn_blocks = None
-        self.scale_blocks = None
 class UNet(nn.Module):
     def __init__(
         self,
