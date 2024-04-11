@@ -109,7 +109,7 @@ class SelfAttentionBlock(nn.Module):
 
 class ResidualBlock(nn.Module):
     def __init__(self, in_channels, out_channels, time_embedding_dim, stride=1):
-        self.time_mlp = nn.Linear(time_embedding_dim, in_channels)
+        self.time_mlp = nn.Linear(time_embedding_dim, out_channels)
         super(ResidualBlock, self).__init__()
         self.conv1 = nn.Sequential(
             nn.Conv2d(
