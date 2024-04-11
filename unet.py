@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-from torchsummary import summary
 
 # TODO: implement attention block
 class AttentionBlock(nn.Module):
@@ -22,7 +21,7 @@ class ResidualBlock(nn.Module):
         )
         self.downsample = downsample
         self.relu = nn.ReLU()
-        self.out_channesl = out_channels
+        self.out_channels = out_channels
     
     def forward(self, x):
         residual = x
