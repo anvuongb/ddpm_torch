@@ -8,12 +8,13 @@ from torchvision.transforms import Resize
 # TODO: implement temporal unet
 
 class DownSampleBlock(nn.Module):
-    def __init__(self):
+    def __init__(self, use_conv=True):
         super(DownSampleBlock, self).__init__()
+        self.use_conv = use_conv
 
-    def forward(self, x, use_conv=True):
+    def forward(self, x):
         N, C, H, W = x.shape
-        if use_conv:
+        if self.use_conv:
             down = nn.Conv2d(in_channels=C, out_channels=C, kernel_size=3, stride=2)
         else:
             down = nn.AvgPool2d(kernel_size=2, stride=2)
@@ -25,14 +26,15 @@ class DownSampleBlock(nn.Module):
         return x
 
 class UpSampleBlock(nn.Module):
-    def __init__(self):
+    def __init__(self, use_conv=True):
         super(UpSampleBlock, self).__init__()
+        self.use_conv = use_conv
 
-    def forward(self, x, use_conv=True):
+    def forward(self, x):
         N, C, H, W = x.shape
         resize = Resize((H*2, W*2))
         x = resize(x)
-        if use_conv:
+        if self.use_conv:
             conv = nn.Conv2d(in_channels=C, out_channels=C, kernel_size=3, stride=1)
             x = conv(x)
 
@@ -111,14 +113,24 @@ class ResidualBlock(nn.Module):
         return x
     
 if __name__ == "__main__":
-    model = ResidualBlock(32, 32).to("cpu")
-    total_params = sum([p.numel() for p in model.parameters()])
-    print("Total parameters = ", total_params)
-    for name, param in model.state_dict().items():
-        print(name, param.size())
+    # model = ResidualBlock(32, 32).to("cpu")
+    # total_params = sum([p.numel() for p in model.parameters()])
+    # print("Total parameters = ", total_params)
+    # for name, param in model.state_dict().items():
+    #     print(name, param.size())
 
-    model = SelfAttentionBlock(128, 2).to("cpu")
-    total_params = sum([p.numel() for p in model.parameters()])
-    print("Total parameters = ", total_params)
-    for name, param in model.state_dict().items():
-        print(name, param.size())
+    # model = SelfAttentionBlock(128, 2).to("cpu")
+    # total_params = sum([p.numel() for p in model.parameters()])
+    # print("Total parameters = ", total_params)
+    # for name, param in model.state_dict().items():
+    #     print(name, param.size())
+
+    test = torch.randn( size=(8, 32, 224, 224))
+    downsample = DownSampleBlock(use_conv=False)
+    test = downsample(test)
+    print(test.shape)
+
+    test = torch.randn( size=(8, 32, 224, 224))
+    upsample = UpSampleBlock(use_conv=False)
+    test = upsample(test)
+    print(test.shape)
