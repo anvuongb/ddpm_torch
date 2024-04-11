@@ -139,6 +139,9 @@ class ResidualBlock(nn.Module):
         # self.batch_norm_2 = nn.BatchNorm2d(out_channels)
 
     def forward(self, x, t_emb):
+        # TODO: 
+        # add normalization
+        # add time dimension between conv1 and conv2
         residual = x 
         x = self.conv1(x)
         x = self.conv2(x)
