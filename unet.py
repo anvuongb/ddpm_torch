@@ -1,11 +1,13 @@
 import torch
 import torch.nn as nn
+import torch.functional as F
 import numpy as np
 
+
 # TODO: implement temporal unet
-class AttentionBlock(nn.Module):
+class SelfAttentionBlock(nn.Module):
     def __init__(self, embed_size=512, num_heads=8):
-        super(AttentionBlock, self).__init__()
+        super(SelfAttentionBlock, self).__init__()
         assert embed_size % num_heads == 0
         self.embed_size = embed_size
         self.num_heads = num_heads
@@ -18,22 +20,23 @@ class AttentionBlock(nn.Module):
 
         self.fc_out = nn.Linear(self.head_dim * self.num_heads, self.embed_size)   
     
-    def forward(self, values, keys, queries, mask):
-        N = values.shape[0]
-        value_len, key_len, query_len = values.shape[1], keys.shape[1], queries.shape[1]
+    def forward(self, x):
+        N, C, H, W = x.shape
+        value_len, key_len, query_len = x.shape[1], x.shape[1], x.shape[1]
+
+        # normalizing
+        layer_norm = nn.LayerNorm([C, H, W])
+        x = layer_norm(x)
 
         # split into heads
-        values = values.reshape(N, value_len, self.num_heads, self.head_dim)
-        keys = keys.reshape(N, key_len, self.num_heads, self.head_dim)
-        queries = keys.reshape(N, query_len, self.num_heads, self.head_dim)       
+        values = x.reshape(N, value_len, self.num_heads, self.head_dim)
+        keys = x.reshape(N, key_len, self.num_heads, self.head_dim)
+        queries = x.reshape(N, query_len, self.num_heads, self.head_dim)       
 
         energy = torch.einsum("nqhd,nkhd->nhqk", [queries, keys])
         # queries shape N x query_len x num_heads x head_dim
         # keys shape N x key_len x num_heads x head_dim
         # energy shape N x num_heads x query_len x key_len
-
-        if mask is not None:
-            energy = energy.masked_fill(mask=0, value=float("-1e20"))
 
         attention = torch.softmax(energy/self.sqrt_dims, dim=3)
         out = torch.einsum("nhql,nlhd->nqhd",[attention, values]).reshape(N, query_len, self.num_heads * self.head_dim)
@@ -79,7 +82,7 @@ if __name__ == "__main__":
     for name, param in model.state_dict().items():
         print(name, param.size())
 
-    model = AttentionBlock(128, 2).to("cpu")
+    model = SelfAttentionBlock(128, 2).to("cpu")
     total_params = sum([p.numel() for p in model.parameters()])
     print("Total parameters = ", total_params)
     for name, param in model.state_dict().items():
