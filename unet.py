@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-# TODO: implement attention block
+# TODO: implement temporal unet
 class AttentionBlock(nn.Module):
     def __init__(self, embed_size=512, num_heads=8):
         super(AttentionBlock, self).__init__()
