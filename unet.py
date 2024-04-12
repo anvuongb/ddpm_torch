@@ -61,7 +61,6 @@ class UpSampleBlock(nn.Module):
         return x
 
 
-# TODO: this is wrong, need to fix
 class SelfAttentionBlock(nn.Module):
     def __init__(self, in_channels, num_heads=8):
         super(SelfAttentionBlock, self).__init__()
@@ -109,19 +108,22 @@ class SelfAttentionBlock(nn.Module):
 
         # compute QK
         N, C, H, W = q.shape
-        q = q.reshape(N, C, H*W) # N x C x HW
-        k = k.reshape(N, C, H*W) # N x C x HW
-        w_qk = torch.einsum("ncq,nck->nqk", [q, k]) # N x HW x HW
-        w_qk *= int(C)**(-0.5) # scaled-dot sqrt(dim)
+        q = q.reshape(N, C, H * W)  # N x C x HW
+        k = k.reshape(N, C, H * W)  # N x C x HW
+        w_qk = torch.einsum("ncq,nck->nqk", [q, k])  # N x HW x HW
+        w_qk *= int(C) ** (-0.5)  # scaled-dot sqrt(dim)
         w_qk = torch.nn.functional.softmax(w_qk, dim=2)
 
         # attend to V
-        v = v.reshape(N, C, H*W) # N x C x HW
+        v = v.reshape(N, C, H * W)  # N x C x HW
         attn = torch.einsum("ncq,nqk->ncq", [v, w_qk])
         attn = attn.reshape(N, C, H, W)
         attn = self.conv_out(attn)
 
         return attn
+
+
+# TODO: either this is wrong, or the construction of UNet is wrong, something is off
 class ResidualBlock(nn.Module):
     def __init__(
         self, in_channels, out_channels, time_embedding_dim, stride=1, dropout=0.1
