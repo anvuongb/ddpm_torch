@@ -28,7 +28,7 @@ class DownSampleBlock(nn.Module):
         else:
             down = nn.AvgPool2d(kernel_size=2, stride=2)
             x = down(x)
-        print(f"    down x_out.shape={x.shape}")
+        # print(f"    down x_out.shape={x.shape}")
         assert x.shape[2] == H // 2
         assert x.shape[3] == W // 2
 
@@ -56,7 +56,7 @@ class UpSampleBlock(nn.Module):
         if self.use_conv:
             x = self.conv(x)
 
-        print(f"    up x_out.shape={x.shape}")
+        # print(f"    up x_out.shape={x.shape}")
         assert x.shape[2] == H * 2
         assert x.shape[3] == W * 2
 
@@ -102,7 +102,7 @@ class SelfAttentionBlock(nn.Module):
         )
 
     def forward(self, x):
-        print(f"    attn in={self.in_channels} x_in.shape={x.shape}")
+        # print(f"    attn in={self.in_channels} x_in.shape={x.shape}")
         h_ = x
         h_ = self.norm(h_)
         q = self.conv_queries(h_)
@@ -122,7 +122,7 @@ class SelfAttentionBlock(nn.Module):
         attn = torch.einsum("ncq,nqk->ncq", [v, w_qk])
         attn = attn.reshape(N, C, H, W)
         attn = self.conv_out(attn)
-        print(f"    attn x_out.shape={x.shape}")
+        # print(f"    attn x_out.shape={x.shape}")
         return attn
 
 
@@ -140,7 +140,7 @@ class ResidualBlock(nn.Module):
         self.name = name
         self.in_channels = in_channels
         self.out_channels = out_channels
-        # print("in_channels, out_channels", self.in_channels, self.out_channels)
+        # #print("in_channels, out_channels", self.in_channels, self.out_channels)
         self.time_mlp = nn.Linear(time_embedding_dim, out_channels)
         self.conv1 = nn.Sequential(
             nn.Conv2d(
@@ -180,9 +180,8 @@ class ResidualBlock(nn.Module):
         x = x_in
         t_emb = self.time_mlp(t_emb_in)
 
-        print(
-            f"{self.name}\n   in={self.in_channels}, out={self.out_channels}\n    x_in.shape={x.shape}"
-        )
+        # fmt: off
+        #print(f"{self.name}\n   in={self.in_channels}, out={self.out_channels}\n    x_in.shape={x.shape}")
 
         residual = x
         x = self.batch_norm_1(x)
@@ -197,7 +196,7 @@ class ResidualBlock(nn.Module):
             residual = self.skip_conv(residual)
         x = x + residual
         # x = self.relu(x)
-        print(f"    x_out.shape={x.shape}")
+        #print(f"    x_out.shape={x.shape}")
         return x
 
 
@@ -218,7 +217,7 @@ class SinusoidalPositionalEmbedding(nn.Module):
         )  # got 1/(10000^(k/d))
         embeddings = t[:, None] * embeddings[None, :]  # got frequencies
         embeddings = torch.cat([embeddings.sin(), embeddings.cos()], dim=-1)
-        # print(embeddings.shape)
+        # #print(embeddings.shape)
         return embeddings
 
 
@@ -274,9 +273,9 @@ class UNet(nn.Module):
             attn_blocks = nn.ModuleList()
             block_dim_in = self.init_channels * in_channels_multipliers[i]
             block_dim_out = self.init_channels * self.channels_multipliers[i]
-            print(f"down {i} with mult={self.channels_multipliers[i]}")
+            # print(f"down {i} with mult={self.channels_multipliers[i]}")
             for j in range(self.num_res_blocks):
-                print(f"     res block {j}, c_in={block_dim_in}, c_out={block_dim_out}")
+                # print(f"     res block {j}, c_in={block_dim_in}, c_out={block_dim_out}")
                 res_blocks.append(
                     ResidualBlock(
                         block_dim_in,
@@ -314,7 +313,7 @@ class UNet(nn.Module):
         )
 
         # STAGE 3: Upsampling
-        print(block_dim_list)
+        # print(block_dim_list)
         self.up = nn.ModuleList()
         for i in reversed(range(len(self.channels_multipliers))):
             res_blocks = nn.ModuleList()
@@ -322,7 +321,7 @@ class UNet(nn.Module):
             block_dim_out = self.init_channels * self.channels_multipliers[i]
             skip_dim_in = self.init_channels * self.channels_multipliers[i]
             # skip_dim_in = 0
-            print(f"up {i} with mult={self.channels_multipliers[i]}")
+            # print(f"up {i} with mult={self.channels_multipliers[i]}")
             for j in reversed(range(self.num_res_blocks)):
                 # if j == self.num_res_blocks:
                 #     skip_dim_in = self.init_channels * in_channels_multipliers[i]
@@ -330,9 +329,8 @@ class UNet(nn.Module):
                 block_dim_out = block_dim_list[i * self.num_res_blocks + j][0]
                 if j < self.num_res_blocks - 1:
                     skip_dim_in = 0
-                print(
-                    f"     res block {self.num_res_blocks-j-1}, c_in={block_dim_in} + {skip_dim_in}, c_out={block_dim_out}"
-                )
+                # fmt:off
+                # print(f"     res block {self.num_res_blocks-j-1}, c_in={block_dim_in} + {skip_dim_in}, c_out={block_dim_out}")
                 res_blocks.append(
                     ResidualBlock(
                         block_dim_in + skip_dim_in,
@@ -421,14 +419,17 @@ if __name__ == "__main__":
         in_channels=3,
         out_channels=3,
         num_res_blocks=2,
-        attn_resolutions=(16, 32,),
+        attn_resolutions=(
+            16,
+            32,
+        ),
         input_img_resolution=128,
         channels_multipliers=(1, 2, 2, 2),
     ).to("cpu")
     total_params = sum([p.numel() for p in model.parameters()])
-    print("Total parameters = ", total_params)
+    # print("Total parameters = ", total_params)
     # for name, param in model.state_dict().items():
-    #     print(name, param.size())
+    #     #print(name, param.size())
 
     test_data = np.random.randn(8, 3, 128, 128).astype(np.float32)
     test_data = torch.from_numpy(test_data).to("cpu")
@@ -439,22 +440,22 @@ if __name__ == "__main__":
 
     # model = ResidualBlock(32, 32, 512).to("cpu")
     # total_params = sum([p.numel() for p in model.parameters()])
-    # print("Total parameters = ", total_params)
+    # #print("Total parameters = ", total_params)
     # for name, param in model.state_dict().items():
-    #     print(name, param.size())
+    #     #print(name, param.size())
 
     # model = SelfAttentionBlock(128, 2).to("cpu")
     # total_params = sum([p.numel() for p in model.parameters()])
-    # print("Total parameters = ", total_params)
+    # #print("Total parameters = ", total_params)
     # for name, param in model.state_dict().items():
-    #     print(name, param.size())
+    #     #print(name, param.size())
 
     # test = torch.randn(size=(8, 32, 256, 256))
     # downsample = DownSampleBlock(channels=32, use_conv=True)
     # test = downsample(test)
-    # print(test.shape)
+    # #print(test.shape)
 
     # test = torch.randn(size=(8, 32, 128, 128))
     # upsample = UpSampleBlock(channels=32, use_conv=True)
     # test = upsample(test)
-    # print(test.shape)
+    # #print(test.shape)
