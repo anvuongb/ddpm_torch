@@ -20,7 +20,8 @@ class DownSampleBlock(nn.Module):
             padding=1,
         )
 
-    def forward(self, x):
+    def forward(self, x_in):
+        x = x_in
         N, C, H, W = x.shape
         if self.use_conv:
             x = self.conv(x)
@@ -28,8 +29,8 @@ class DownSampleBlock(nn.Module):
             down = nn.AvgPool2d(kernel_size=2, stride=2)
             x = down(x)
         print(f"    down x_out.shape={x.shape}")
-        assert x.shape[2].item() == H // 2
-        assert x.shape[3].item() == W // 2
+        assert x.shape[2] == H // 2
+        assert x.shape[3] == W // 2
 
         return x
 
@@ -47,7 +48,8 @@ class UpSampleBlock(nn.Module):
                 padding=1,
             )
 
-    def forward(self, x):
+    def forward(self, x_in):
+        x = x_in
         N, C, H, W = x.shape
         resize = Resize((H * 2, W * 2))
         x = resize(x)
@@ -55,8 +57,8 @@ class UpSampleBlock(nn.Module):
             x = self.conv(x)
 
         print(f"    up x_out.shape={x.shape}")
-        assert x.shape[2].item() == H * 2
-        assert x.shape[3].item() == W * 2
+        assert x.shape[2] == H * 2
+        assert x.shape[3] == W * 2
 
         return x
 
@@ -102,7 +104,7 @@ class SelfAttentionBlock(nn.Module):
     def forward(self, x):
         print(f"    attn in={self.in_channels} x_in.shape={x.shape}")
         h_ = x
-        h_ = self.norm(x)
+        h_ = self.norm(h_)
         q = self.conv_queries(h_)
         k = self.conv_keys(h_)
         v = self.conv_values(h_)
@@ -112,7 +114,7 @@ class SelfAttentionBlock(nn.Module):
         q = q.reshape(N, C, H * W)  # N x C x HW
         k = k.reshape(N, C, H * W)  # N x C x HW
         w_qk = torch.einsum("ncq,nck->nqk", [q, k])  # N x HW x HW
-        w_qk *= int(C) ** (-0.5)  # scaled-dot sqrt(dim)
+        w_qk = w_qk * int(C) ** (-0.5)  # scaled-dot sqrt(dim)
         w_qk = torch.nn.functional.softmax(w_qk, dim=2)
 
         # attend to V
@@ -174,8 +176,9 @@ class ResidualBlock(nn.Module):
             padding=1,
         )
 
-    def forward(self, x, t_emb):
-        t_emb = self.time_mlp(t_emb)
+    def forward(self, x_in, t_emb_in):
+        x = x_in
+        t_emb = self.time_mlp(t_emb_in)
 
         print(
             f"{self.name}\n   in={self.in_channels}, out={self.out_channels}\n    x_in.shape={x.shape}"
@@ -192,8 +195,8 @@ class ResidualBlock(nn.Module):
         x = self.conv2(x)
         if self.in_channels != self.out_channels:
             residual = self.skip_conv(residual)
-        x += residual
-        x = self.relu(x)
+        x = x + residual
+        # x = self.relu(x)
         print(f"    x_out.shape={x.shape}")
         return x
 
@@ -359,9 +362,10 @@ class UNet(nn.Module):
             padding=1,
         )
 
-    def forward(self, x, t):
-        assert x.shape[2].item() == self.input_img_resolution  # square image
-        assert x.shape[3].item() == self.input_img_resolution  # square image
+    def forward(self, x_in, t_in):
+        x, t = x_in, t_in
+        assert x.shape[2] == self.input_img_resolution  # square image
+        assert x.shape[3] == self.input_img_resolution  # square image
 
         # STAGE 0: time embedding
         t_emb = self.t_emb(t)
