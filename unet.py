@@ -61,55 +61,75 @@ class UpSampleBlock(nn.Module):
         return x
 
 
+# TODO: this is wrong, need to fix
 class SelfAttentionBlock(nn.Module):
-    def __init__(self, embed_size=512, num_heads=8):
+    def __init__(self, in_channels, num_heads=8):
         super(SelfAttentionBlock, self).__init__()
-        assert embed_size % num_heads == 0
-        self.embed_size = embed_size
-        self.num_heads = num_heads
-        self.head_dim = int(embed_size / num_heads)
-        self.sqrt_dims = np.sqrt(embed_size)
 
-        self.values = nn.Linear(self.head_dim, self.head_dim, bias=False)
-        self.keys = nn.Linear(self.head_dim, self.head_dim, bias=False)
-        self.queries = nn.Linear(self.head_dim, self.head_dim, bias=False)
+        self.norm = nn.GroupNorm(
+            num_channels=in_channels, num_groups=32, eps=1e-6, affine=True
+        )
 
-        self.fc_out = nn.Linear(self.head_dim * self.num_heads, self.embed_size)
+        self.conv_values = nn.Conv2d(
+            in_channels=in_channels,
+            out_channels=in_channels,
+            stride=1,
+            kernel_size=1,
+            padding=0,
+        )
+        self.conv_keys = nn.Conv2d(
+            in_channels=in_channels,
+            out_channels=in_channels,
+            stride=1,
+            kernel_size=1,
+            padding=0,
+        )
+        self.conv_queries = nn.Conv2d(
+            in_channels=in_channels,
+            out_channels=in_channels,
+            stride=1,
+            kernel_size=1,
+            padding=0,
+        )
+
+        self.conv_out = nn.Conv2d(
+            in_channels=in_channels,
+            out_channels=in_channels,
+            stride=1,
+            kernel_size=1,
+            padding=0,
+        )
 
     def forward(self, x):
-        N, C, H, W = x.shape
-        value_len, key_len, query_len = x.shape[1], x.shape[1], x.shape[1]
+        h_ = x
+        h_ = self.norm(x)
+        q = self.conv_queries(h_)
+        k = self.conv_keys(h_)
+        v = self.conv_values(h_)
 
-        # normalizing
-        layer_norm = nn.LayerNorm([C, H, W])
-        x = layer_norm(x)
+        # compute QK
+        N, C, H, W = q.shape
+        q = q.reshape(N, C, H*W) # N x C x HW
+        k = k.reshape(N, C, H*W) # N x C x HW
+        w_qk = torch.einsum("ncq,nck->nqk", [q, k]) # N x HW x HW
+        w_qk *= int(C)**(-0.5) # scaled-dot sqrt(dim)
+        w_qk = torch.nn.functional.softmax(w_qk, dim=2)
 
-        # split into heads
-        values = x.reshape(N, value_len, self.num_heads, self.head_dim)
-        keys = x.reshape(N, key_len, self.num_heads, self.head_dim)
-        queries = x.reshape(N, query_len, self.num_heads, self.head_dim)
+        # attend to V
+        v = v.reshape(N, C, H*W) # N x C x HW
+        attn = torch.einsum("ncq,nqk->ncq", [v, w_qk])
+        attn = attn.reshape(N, C, H, W)
+        attn = self.conv_out(attn)
 
-        energy = torch.einsum("nqhd,nkhd->nhqk", [queries, keys])
-        # queries shape N x query_len x num_heads x head_dim
-        # keys shape N x key_len x num_heads x head_dim
-        # energy shape N x num_heads x query_len x key_len
-
-        attention = torch.softmax(energy / self.sqrt_dims, dim=3)
-        out = torch.einsum("nhql,nlhd->nqhd", [attention, values]).reshape(
-            N, query_len, self.num_heads * self.head_dim
-        )
-        # attention shape N x num_heads x query_len x key_len
-        # values shape N x value_len x num_heads x head_dim
-        # einsum shape N x query_len x num_heads x head_dim
-        # can do this because value_len, key_len, query_len are all the same
-        # out flatten
-        out = self.fc_out(out)
-        return out
-
-
+        return attn
 class ResidualBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, time_embedding_dim, stride=1):
+    def __init__(
+        self, in_channels, out_channels, time_embedding_dim, stride=1, dropout=0.1
+    ):
         super(ResidualBlock, self).__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        print("in_channels, out_channels", self.in_channels, self.out_channels)
         self.time_mlp = nn.Linear(time_embedding_dim, out_channels)
         self.conv1 = nn.Sequential(
             nn.Conv2d(
@@ -134,21 +154,32 @@ class ResidualBlock(nn.Module):
             nn.ReLU(),
         )
         self.relu = nn.ReLU()
-        self.out_channesl = out_channels
-        self.batch_norm_1 = nn.BatchNorm2d(out_channels)
+        self.batch_norm_1 = nn.BatchNorm2d(in_channels)
         self.batch_norm_2 = nn.BatchNorm2d(out_channels)
+        self.dropout = nn.Dropout(dropout)
+        self.skip_conv = nn.Conv2d(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+        )
 
     def forward(self, x, t_emb):
         t_emb = self.time_mlp(t_emb)
-        
-        residual = x 
+
+        residual = x
+        print("x_shape", x.shape)
         x = self.batch_norm_1(x)
         x = self.conv1(x)
-
-        x = x + t_emb[:, None, None]
+        t_emb = t_emb[:, :, None, None]
+        x = x + t_emb
 
         x = self.batch_norm_2(x)
+        x = self.dropout(x)
         x = self.conv2(x)
+        if self.in_channels != self.out_channels:
+            residual = self.skip_conv(residual)
         x += residual
         x = self.relu(x)
         return x
@@ -167,11 +198,13 @@ class SinusoidalPositionalEmbedding(nn.Module):
         # TODO: benchmark this later
         embeddings = np.log(10000) / (half_dims - 1)
         embeddings = torch.exp(
-            torch.arange(-embeddings * half_dims, device=t.device)
+            -embeddings * torch.arange(half_dims, device=t.device)
         )  # got 1/(10000^(k/d))
-        embeddings = t[:, None] * embeddings[:, None]  # got frequencies
+        embeddings = t[:, None] * embeddings[None, :]  # got frequencies
         embeddings = torch.cat([embeddings.sin(), embeddings.cos()], dim=-1)
+        # print(embeddings.shape)
         return embeddings
+
 
 class UNet(nn.Module):
     def __init__(
@@ -224,29 +257,138 @@ class UNet(nn.Module):
             block_dim_in = self.init_channels * in_channels_multipliers[i]
             block_dim_out = self.init_channels * self.channels_multipliers[i]
             for _ in range(self.num_res_blocks):
-                res_blocks.append(ResidualBlock(block_dim_in, block_dim_out, self.time_emb_size))
+                res_blocks.append(
+                    ResidualBlock(block_dim_in, block_dim_out, self.time_emb_size)
+                )
                 block_dim_in = block_dim_out
                 if current_res in attn_resolutions:
                     attn_blocks.append(SelfAttentionBlock(block_dim_in, 1))
             level_objects = nn.Module()
             level_objects.res_blocks = res_blocks
-            level_objects.attn_blocks = attn_blocks 
-            if i < len(self.channels_multipliers)-1:
+            level_objects.attn_blocks = attn_blocks
+            if i < len(self.channels_multipliers) - 1:
                 level_objects.scale = DownSampleBlock(block_dim_in, use_conv=True)
                 current_res = current_res // 2
             self.down.append(level_objects)
 
         # STAGE 2: Middle
-        # TODO: finish this stage
         self.middle = nn.Module()
-        self.middle.res_block_1 = ResidualBlock()
+        self.middle.res_block_1 = ResidualBlock(
+            in_channels=block_dim_in,
+            out_channels=block_dim_in,
+            time_embedding_dim=self.time_emb_size,
+        )
+        self.middle.attn_block = SelfAttentionBlock(block_dim_in, 1)
+        self.middle.res_block_2 = ResidualBlock(
+            in_channels=block_dim_in,
+            out_channels=block_dim_in,
+            time_embedding_dim=self.time_emb_size,
+        )
+
+        # STAGE 3: Upsampling
+        self.up = nn.ModuleList()
+        for i in reversed(range(len(self.channels_multipliers))):
+            res_blocks = nn.ModuleList()
+            attn_blocks = nn.ModuleList()
+            block_dim_out = self.init_channels * self.channels_multipliers[i]
+            skip_dim_in = self.init_channels * self.channels_multipliers[i]
+            for j in range(self.num_res_blocks + 1):
+                if j == self.num_res_blocks:
+                    skip_dim_in = self.init_channels * in_channels_multipliers[i]
+                res_blocks.append(
+                    ResidualBlock(
+                        block_dim_in + skip_dim_in, block_dim_out, self.time_emb_size
+                    )
+                )
+                block_dim_in = block_dim_out
+                if current_res in attn_resolutions:
+                    attn_blocks.append(SelfAttentionBlock(block_dim_in, 1))
+            level_objects = nn.Module()
+            level_objects.res_blocks = res_blocks
+            level_objects.attn_blocks = attn_blocks
+            if i > 0:
+                level_objects.scale = UpSampleBlock(block_dim_in, use_conv=True)
+                current_res = current_res * 2
+            self.up.insert(0, level_objects)
+
+        # Final stage
+        self.out_norm = nn.GroupNorm(num_groups=32, num_channels=block_dim_in)
+        self.out_conv = nn.Conv2d(
+            in_channels=block_dim_in,
+            out_channels=self.out_channels,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+        )
+
+    def forward(self, x, t):
+        assert x.shape[2] == x.shape[3] == self.input_img_resolution  # square image
+
+        # STAGE 0: time embedding
+        t_emb = self.t_emb(t)
+
+        # STAGE 1: Downsampling
+        h_list = [self.conv_init(x)]
+        for i in range(len(self.channels_multipliers)):
+            for j in range(self.num_res_blocks):
+                h = self.down[i].res_blocks[j](h_list[-1], t_emb)
+                if len(self.down[i].attn_blocks) > 0:
+                    h = self.down[i].attn_blocks[j](h)
+                h_list.append(h)
+            if i < len(self.channels_multipliers) - 1:
+                h = self.down[i].scale(h)
+                h_list.append(h)
+
+        # STAGE 2: Middle
+        h = self.middle.res_block_1(h, t_emb)
+        h = self.middle.attn_block(h)
+        h = self.middle.res_block_2(h, t_emb)
+
+        # STAGE 3: Upsampling
+        for i in reversed(range(len(self.channels_multipliers))):
+            for j in range(self.num_res_blocks + 1):
+                h = self.up[i].res_blocks[j](torch.cat([h, h_list.pop()], dim=1), t_emb)
+                if len(self.up[i].attn_blocks) > 0:
+                    h = self.up[i].attn_blocks[j](h)
+                h_list.append(h)
+            if i > 0:
+                h = self.up[i].scale(h)
+                h_list.append(h)
+
+        # Final stage
+        h = self.out_norm(h)
+        h = self.out_conv(h)
+
+        return h
+
 
 if __name__ == "__main__":
-    model = ResidualBlock(32, 32, 512).to("cpu")
+    model = UNet(
+        init_channels=32,
+        in_channels=3,
+        out_channels=3,
+        num_res_blocks=2,
+        attn_resolutions=(16,),
+        input_img_resolution=32,
+        channels_multipliers=(1, 2, 2, 2),
+    ).to("cpu")
     total_params = sum([p.numel() for p in model.parameters()])
     print("Total parameters = ", total_params)
-    for name, param in model.state_dict().items():
-        print(name, param.size())
+    # for name, param in model.state_dict().items():
+    #     print(name, param.size())
+
+    test_data = np.random.randn(8, 3, 32, 32).astype(np.float32)
+    test_data = torch.from_numpy(test_data).to("cpu")
+
+    t = torch.from_numpy(np.array(np.arange(8))).to("cpu")
+
+    torch.onnx.export(model, (test_data, t), f="unet.onnx")
+
+    # model = ResidualBlock(32, 32, 512).to("cpu")
+    # total_params = sum([p.numel() for p in model.parameters()])
+    # print("Total parameters = ", total_params)
+    # for name, param in model.state_dict().items():
+    #     print(name, param.size())
 
     # model = SelfAttentionBlock(128, 2).to("cpu")
     # total_params = sum([p.numel() for p in model.parameters()])
