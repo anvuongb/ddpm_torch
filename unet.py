@@ -27,9 +27,9 @@ class DownSampleBlock(nn.Module):
         else:
             down = nn.AvgPool2d(kernel_size=2, stride=2)
             x = down(x)
-        print(x.shape)
-        assert x.shape[2] == H // 2
-        assert x.shape[3] == W // 2
+        print(f"    down x_out.shape={x.shape}")
+        assert x.shape[2].item() == H // 2
+        assert x.shape[3].item() == W // 2
 
         return x
 
@@ -54,17 +54,17 @@ class UpSampleBlock(nn.Module):
         if self.use_conv:
             x = self.conv(x)
 
-        print(x.shape)
-        assert x.shape[2] == H * 2
-        assert x.shape[3] == W * 2
+        print(f"    up x_out.shape={x.shape}")
+        assert x.shape[2].item() == H * 2
+        assert x.shape[3].item() == W * 2
 
         return x
 
 
 class SelfAttentionBlock(nn.Module):
-    def __init__(self, in_channels, num_heads=8):
+    def __init__(self, in_channels, num_heads=8, name="none"):
         super(SelfAttentionBlock, self).__init__()
-
+        self.in_channels = in_channels
         self.norm = nn.GroupNorm(
             num_channels=in_channels, num_groups=32, eps=1e-6, affine=True
         )
@@ -100,6 +100,7 @@ class SelfAttentionBlock(nn.Module):
         )
 
     def forward(self, x):
+        print(f"    attn in={self.in_channels} x_in.shape={x.shape}")
         h_ = x
         h_ = self.norm(x)
         q = self.conv_queries(h_)
@@ -119,19 +120,25 @@ class SelfAttentionBlock(nn.Module):
         attn = torch.einsum("ncq,nqk->ncq", [v, w_qk])
         attn = attn.reshape(N, C, H, W)
         attn = self.conv_out(attn)
-
+        print(f"    attn x_out.shape={x.shape}")
         return attn
 
 
-# TODO: either this is wrong, or the construction of UNet is wrong, something is off
 class ResidualBlock(nn.Module):
     def __init__(
-        self, in_channels, out_channels, time_embedding_dim, stride=1, dropout=0.1
+        self,
+        in_channels,
+        out_channels,
+        time_embedding_dim,
+        stride=1,
+        dropout=0.1,
+        name="none",
     ):
         super(ResidualBlock, self).__init__()
+        self.name = name
         self.in_channels = in_channels
         self.out_channels = out_channels
-        print("in_channels, out_channels", self.in_channels, self.out_channels)
+        # print("in_channels, out_channels", self.in_channels, self.out_channels)
         self.time_mlp = nn.Linear(time_embedding_dim, out_channels)
         self.conv1 = nn.Sequential(
             nn.Conv2d(
@@ -170,8 +177,11 @@ class ResidualBlock(nn.Module):
     def forward(self, x, t_emb):
         t_emb = self.time_mlp(t_emb)
 
+        print(
+            f"{self.name}\n   in={self.in_channels}, out={self.out_channels}\n    x_in.shape={x.shape}"
+        )
+
         residual = x
-        print("x_shape", x.shape)
         x = self.batch_norm_1(x)
         x = self.conv1(x)
         t_emb = t_emb[:, :, None, None]
@@ -184,6 +194,7 @@ class ResidualBlock(nn.Module):
             residual = self.skip_conv(residual)
         x += residual
         x = self.relu(x)
+        print(f"    x_out.shape={x.shape}")
         return x
 
 
@@ -250,6 +261,8 @@ class UNet(nn.Module):
             padding=1,
         )
 
+        block_dim_list = []
+
         current_res = input_img_resolution
         in_channels_multipliers = (1,) + self.channels_multipliers
         self.down = nn.ModuleList()
@@ -258,10 +271,18 @@ class UNet(nn.Module):
             attn_blocks = nn.ModuleList()
             block_dim_in = self.init_channels * in_channels_multipliers[i]
             block_dim_out = self.init_channels * self.channels_multipliers[i]
-            for _ in range(self.num_res_blocks):
+            print(f"down {i} with mult={self.channels_multipliers[i]}")
+            for j in range(self.num_res_blocks):
+                print(f"     res block {j}, c_in={block_dim_in}, c_out={block_dim_out}")
                 res_blocks.append(
-                    ResidualBlock(block_dim_in, block_dim_out, self.time_emb_size)
+                    ResidualBlock(
+                        block_dim_in,
+                        block_dim_out,
+                        self.time_emb_size,
+                        name=f"down{i}b{j}",
+                    )
                 )
+                block_dim_list.append([block_dim_in, block_dim_out])
                 block_dim_in = block_dim_out
                 if current_res in attn_resolutions:
                     attn_blocks.append(SelfAttentionBlock(block_dim_in, 1))
@@ -279,27 +300,42 @@ class UNet(nn.Module):
             in_channels=block_dim_in,
             out_channels=block_dim_in,
             time_embedding_dim=self.time_emb_size,
+            name="mid1",
         )
         self.middle.attn_block = SelfAttentionBlock(block_dim_in, 1)
         self.middle.res_block_2 = ResidualBlock(
             in_channels=block_dim_in,
             out_channels=block_dim_in,
             time_embedding_dim=self.time_emb_size,
+            name="mid2",
         )
 
         # STAGE 3: Upsampling
+        print(block_dim_list)
         self.up = nn.ModuleList()
         for i in reversed(range(len(self.channels_multipliers))):
             res_blocks = nn.ModuleList()
             attn_blocks = nn.ModuleList()
             block_dim_out = self.init_channels * self.channels_multipliers[i]
             skip_dim_in = self.init_channels * self.channels_multipliers[i]
-            for j in range(self.num_res_blocks + 1):
-                if j == self.num_res_blocks:
-                    skip_dim_in = self.init_channels * in_channels_multipliers[i]
+            # skip_dim_in = 0
+            print(f"up {i} with mult={self.channels_multipliers[i]}")
+            for j in reversed(range(self.num_res_blocks)):
+                # if j == self.num_res_blocks:
+                #     skip_dim_in = self.init_channels * in_channels_multipliers[i]
+                block_dim_in = block_dim_list[i * self.num_res_blocks + j][1]
+                block_dim_out = block_dim_list[i * self.num_res_blocks + j][0]
+                if j < self.num_res_blocks - 1:
+                    skip_dim_in = 0
+                print(
+                    f"     res block {self.num_res_blocks-j-1}, c_in={block_dim_in} + {skip_dim_in}, c_out={block_dim_out}"
+                )
                 res_blocks.append(
                     ResidualBlock(
-                        block_dim_in + skip_dim_in, block_dim_out, self.time_emb_size
+                        block_dim_in + skip_dim_in,
+                        block_dim_out,
+                        self.time_emb_size,
+                        name=f"up{i}b{self.num_res_blocks - j-1}",
                     )
                 )
                 block_dim_in = block_dim_out
@@ -324,22 +360,28 @@ class UNet(nn.Module):
         )
 
     def forward(self, x, t):
-        assert x.shape[2] == x.shape[3] == self.input_img_resolution  # square image
+        assert x.shape[2].item() == self.input_img_resolution  # square image
+        assert x.shape[3].item() == self.input_img_resolution  # square image
 
         # STAGE 0: time embedding
         t_emb = self.t_emb(t)
 
         # STAGE 1: Downsampling
-        h_list = [self.conv_init(x)]
+        h_list = []
         for i in range(len(self.channels_multipliers)):
             for j in range(self.num_res_blocks):
-                h = self.down[i].res_blocks[j](h_list[-1], t_emb)
+                if i == 0 and j == 0:
+                    h_ = self.conv_init(x)
+                    h = self.down[i].res_blocks[j](h_, t_emb)
+                else:
+                    h = self.down[i].res_blocks[j](h, t_emb)
                 if len(self.down[i].attn_blocks) > 0:
                     h = self.down[i].attn_blocks[j](h)
-                h_list.append(h)
+                if j == self.num_res_blocks - 1:
+                    h_list.append(h)
             if i < len(self.channels_multipliers) - 1:
                 h = self.down[i].scale(h)
-                h_list.append(h)
+                # h_list.append(h)
 
         # STAGE 2: Middle
         h = self.middle.res_block_1(h, t_emb)
@@ -348,14 +390,19 @@ class UNet(nn.Module):
 
         # STAGE 3: Upsampling
         for i in reversed(range(len(self.channels_multipliers))):
-            for j in range(self.num_res_blocks + 1):
-                h = self.up[i].res_blocks[j](torch.cat([h, h_list.pop()], dim=1), t_emb)
+            for j in range(self.num_res_blocks):
+                if j == 0:
+                    h = self.up[i].res_blocks[j](
+                        torch.cat([h, h_list.pop()], dim=1), t_emb
+                    )
+                else:
+                    h = self.up[i].res_blocks[j](h, t_emb)
                 if len(self.up[i].attn_blocks) > 0:
                     h = self.up[i].attn_blocks[j](h)
-                h_list.append(h)
+                # h_list.append(h)
             if i > 0:
                 h = self.up[i].scale(h)
-                h_list.append(h)
+                # h_list.append(h)
 
         # Final stage
         h = self.out_norm(h)
@@ -370,8 +417,8 @@ if __name__ == "__main__":
         in_channels=3,
         out_channels=3,
         num_res_blocks=2,
-        attn_resolutions=(16,),
-        input_img_resolution=32,
+        attn_resolutions=(16, 32,),
+        input_img_resolution=128,
         channels_multipliers=(1, 2, 2, 2),
     ).to("cpu")
     total_params = sum([p.numel() for p in model.parameters()])
@@ -379,7 +426,7 @@ if __name__ == "__main__":
     # for name, param in model.state_dict().items():
     #     print(name, param.size())
 
-    test_data = np.random.randn(8, 3, 32, 32).astype(np.float32)
+    test_data = np.random.randn(8, 3, 128, 128).astype(np.float32)
     test_data = torch.from_numpy(test_data).to("cpu")
 
     t = torch.from_numpy(np.array(np.arange(8))).to("cpu")
