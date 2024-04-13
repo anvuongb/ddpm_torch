@@ -149,8 +149,9 @@ if __name__ == "__main__":
             #     break
 
         print(f"epoch {e} loss={loss.item()}")
-        print("Generating sample images")
-        x_in = torch.ones(16, *x.shape[1:])
-        x_denoised = sample_from_noise(x_in, model, T, alphas_cum, alphas, betas, device=device)
-        x_denoised = x_denoised.to("cpu")
-        show_images_batch(f"sampling_images/sample_epoch_{e}.png", x_denoised)
+        if e % 5 == 0:
+            print("Generating sample images")
+            x_in = torch.ones(16, *x.shape[1:])
+            x_denoised = sample_from_noise(x_in, model, T, alphas_cum, alphas, betas, device=device)
+            x_denoised = x_denoised.to("cpu")
+            show_images_batch(f"sampling_images/sample_epoch_{e}.png", x_denoised)
