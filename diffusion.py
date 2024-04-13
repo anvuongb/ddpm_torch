@@ -51,4 +51,4 @@ if __name__ == "__main__":
     opt.step()
     
     img_diff = x[0].type(torch.uint8)
-    torchvision.io.write_jpeg(img_diff, "test_diffused.jpeg")
+    torchvision.io.write_jpeg(img_diff, "images/test_diffused.jpeg")

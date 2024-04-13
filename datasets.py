@@ -15,7 +15,7 @@ def show_images(data: DataLoader, cols=4):
         plt.imshow(np.array((img.permute(1,2,0)+1)/2*255, dtype=int))
         plt.axis("off")
     plt.tight_layout()
-    fig.savefig("collated_cifar10.png")
+    fig.savefig("images/collated_cifar10.png")
 
 def cifar_data_transform(img_size=32):
     transform = [
