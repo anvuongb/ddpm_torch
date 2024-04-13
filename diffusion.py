@@ -6,7 +6,6 @@ import numpy as np
 from datasets import CifarDataset, cifar_data_transform, show_images_batch
 import tqdm
 
-
 def get_noise_schedule(num_steps, start=0.0001, end=0.01):
     return torch.linspace(start, end, num_steps)
 
@@ -18,14 +17,42 @@ def forward_diffusion(x_0, t, alphas_cum, device="cpu"):
     x_t = torch.sqrt(scale_t) * x_0 + (1 - scale_t) * noise
     return x_t.to(device), noise
 
+
 # TODO: finish this sample function
 @torch.no_grad()
+def one_step_denoising(model, x, t, alphas_cum, alphas, betas, device="cpu"):
+
+    alpha_t = torch.gather(alphas, 1, t)
+    alpha_t = alpha_t[:, :, None, None]
+
+    beta_t = torch.gather(betas, 1, t)
+    beta_t = beta_t[:, :, None, None]
+
+    scale_t = torch.gather(alphas_cum, 1, t)
+    scale_t = scale_t[:, :, None, None]
+    
+    z = torch.randn_like(x)
+    
+    if t.squeeze()[0] == 0:
+        z = z*0
+
+    noise_pred = model(x, t.squeeze())
+
+    x_out = (1/torch.sqrt(alpha_t))*(x - beta_t/torch.sqrt(1-scale_t)*noise_pred) + torch.sqrt(beta_t)*z
+
+    return x_out.to(device)
+
+
+@torch.no_grad()
 def sample_from_noise(
-    x_0: torch.Tensor, model: UNet, timesteps: int, device: str = "cpu"
+    x_0: torch.Tensor, model: UNet, timesteps: int, alphas_cum: torch.Tensor, alphas: torch.Tensor, betas: torch.Tensor, device: str = "cpu"
 ):
     x = torch.randn_like(x_0).to(device)
-    for t in reversed(range(timesteps)):
-        noise_pred = model.forward(x, t)
+    for t_ in tqdm.tqdm(reversed(range(timesteps)), total=timesteps):
+        t = torch.ones(size=(x.shape[0], 1), dtype=int)*t_
+        t = t.to(device)
+        x = one_step_denoising(model, x, t, alphas_cum, alphas, betas, device=device)
+    return x
 
 
 if __name__ == "__main__":
@@ -38,7 +65,7 @@ if __name__ == "__main__":
         )
 
     # Init dataset
-    batch_size = 64
+    batch_size = 128
     data_transform = cifar_data_transform()
     data = CifarDataset(
         img_dir="/home/anvuong/Desktop/datasets/CIFAR-10-images/train",
@@ -54,7 +81,10 @@ if __name__ == "__main__":
         in_channels=3,
         out_channels=3,
         num_res_blocks=3,
-        attn_resolutions=(16,32,),
+        attn_resolutions=(
+            16,
+            32,
+        ),
         input_img_resolution=32,
         channels_multipliers=(1, 2, 2, 2),
     ).to(device)
@@ -65,13 +95,13 @@ if __name__ == "__main__":
     betas = get_noise_schedule(T)
     alphas = 1 - betas
     alphas_cum = torch.cumprod(alphas, dim=0)
+
+    # repeat into batch_size for easier indexing by t
+    betas = betas.unsqueeze(0).repeat(batch_size, 1).to(device)
+    alphas = alphas.unsqueeze(0).repeat(batch_size, 1).to(device)
     alphas_cum = alphas_cum.unsqueeze(0).repeat(batch_size, 1).to(device)
 
     # torch.autograd.set_detect_anomaly(True)
-
-    # Init optimizer
-    opt = torch.optim.Adam(model.parameters(), lr=0.001)
-    opt.zero_grad()
 
     # # Get a sample batch
     # x = next(iter(loader))
@@ -84,7 +114,11 @@ if __name__ == "__main__":
     # show_images_batch("images/x_out.png", x_out)
 
     # train params
-    epochs = 50
+    epochs = 100
+
+    # Init optimizer
+    opt = torch.optim.Adam(model.parameters(), lr=0.001)
+    opt.zero_grad()
 
     # TODO: add sample codes
     # generate samples every epoch
@@ -100,9 +134,12 @@ if __name__ == "__main__":
             x_in, noise_in = forward_diffusion(x, t, alphas_cum, device=device)
             # x_out = forward_diffusion(x, t, alphas_cum, device=device)
 
-            noise_pred = model.forward(x_in, t.squeeze())
-            loss = torch.nn.MSELoss()
-            L = loss(noise_in, noise_pred)
+            noise_pred = model(x_in, t.squeeze())
+            loss = torch.nn.functional.mse_loss(noise_in, noise_pred)
+            loss.backward()
+            opt.step()
+
+            # L = loss(noise_in, noise_pred)
             # print(f"epoch {e} iter {idx} loss={L.item()}")
             # if L.item() == torch.nan:
             #     show_images_batch("images/x_in.png", x_in)
@@ -111,6 +148,9 @@ if __name__ == "__main__":
             #     print("Found nan, break")
             #     break
 
-            L.backward()
-            opt.step()
-        print(f"epoch {e} loss={L.item()}")
+        print(f"epoch {e} loss={loss.item()}")
+        print("Generating sample images")
+        x_in = torch.ones(16, *x.shape[1:])
+        x_denoised = sample_from_noise(x_in, model, T, alphas_cum, alphas, betas, device=device)
+        x_denoised = x_denoised.to("cpu")
+        show_images_batch(f"sampling_images/sample_epoch_{e}.png", x_denoised)
