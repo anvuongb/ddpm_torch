@@ -60,6 +60,8 @@ if __name__ == "__main__":
     # train params
     epochs = 10
     
+    # TODO: add sample codes
+    # generate samples every epoch
     # train loop
     print("num batches = ", len(loader))
     for e in range(epochs):
