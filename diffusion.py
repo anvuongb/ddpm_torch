@@ -1,6 +1,7 @@
 from unet import UNet
 import torch.functional as F
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard import writer 
 import torch
 import numpy as np
 from datasets import CifarDataset, cifar_data_transform, show_images_batch
@@ -104,8 +105,8 @@ if __name__ == "__main__":
     # torch.autograd.set_detect_anomaly(True)
 
     # # Get a sample batch
-    # x = next(iter(loader))
-    # t = torch.randint(low=1, high=T-200, size=(batch_size,1))
+    x = next(iter(loader))
+    t = torch.randint(low=1, high=T-200, size=(batch_size,1))
 
     # x_in = forward_diffusion(x, t+200, alphas_cum, device=device)
     # x_out = forward_diffusion(x, t, alphas_cum, device=device)
@@ -113,17 +114,22 @@ if __name__ == "__main__":
     # show_images_batch("images/x_in.png", x_in)
     # show_images_batch("images/x_out.png", x_out)
 
+    # init tensorboard writer
+    tb_writer = writer.SummaryWriter("logdir/diffusion")
+    tb_writer.add_graph(model=model, input_to_model=[x.to(device), t.squeeze().to(device)])
+
     # train params
     epochs = 100
+
+    # re-init dataloader
+    loader = DataLoader(data, batch_size=batch_size, drop_last=True)
 
     # Init optimizer
     opt = torch.optim.Adam(model.parameters(), lr=0.001)
     opt.zero_grad()
 
-    # TODO: add sample codes
-    # generate samples every epoch
-    # train loop
-    # TODO: loss starts to become nan as epoch 2, need to fix
+    # TODO: currently loss keeps increasing with epochs, shit is happening
+    # TODO: need to fix this
     total = len(loader)
     print("num batches = ", total)
     for e in range(epochs):
@@ -138,16 +144,8 @@ if __name__ == "__main__":
             loss = torch.nn.functional.mse_loss(noise_in, noise_pred)
             loss.backward()
             opt.step()
-
-            # L = loss(noise_in, noise_pred)
-            # print(f"epoch {e} iter {idx} loss={L.item()}")
-            # if L.item() == torch.nan:
-            #     show_images_batch("images/x_in.png", x_in)
-            #     show_images_batch("images/x_out.png", x_out)
-            #     show_images_batch("images/x_denoised.png", x_denoised)
-            #     print("Found nan, break")
-            #     break
-
+            tb_writer.add_scalar("loss", loss.item(), e * total + idx)
+    
         print(f"epoch {e} loss={loss.item()}")
         if e % 5 == 0:
             print("Generating sample images")

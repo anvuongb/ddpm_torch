@@ -370,13 +370,10 @@ class UNet(nn.Module):
 
         # STAGE 1: Downsampling
         h_list = []
+        h = self.conv_init(x)
         for i in range(len(self.channels_multipliers)):
             for j in range(self.num_res_blocks):
-                if i == 0 and j == 0:
-                    h_ = self.conv_init(x)
-                    h = self.down[i].res_blocks[j](h_, t_emb)
-                else:
-                    h = self.down[i].res_blocks[j](h, t_emb)
+                h = self.down[i].res_blocks[j](h, t_emb)
                 if len(self.down[i].attn_blocks) > 0:
                     h = self.down[i].attn_blocks[j](h)
                 if j == self.num_res_blocks - 1:
