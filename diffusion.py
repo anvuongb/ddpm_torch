@@ -63,6 +63,7 @@ if __name__ == "__main__":
     # TODO: add sample codes
     # generate samples every epoch
     # train loop
+    # TODO: loss starts to become nan as epoch 2, need to fix
     print("num batches = ", len(loader))
     for e in range(epochs):
         for idx, x in enumerate(loader):
