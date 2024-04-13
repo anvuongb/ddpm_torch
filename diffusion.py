@@ -20,7 +20,7 @@ if __name__ == "__main__":
     batch_size = 16
     data_transform = cifar_data_transform()
     data = CifarDataset(img_dir="/home/anvuong/Desktop/datasets/CIFAR-10-images/train", classes=["cat"], transform=data_transform)
-    loader = DataLoader(data, batch_size=batch_size)
+    loader = DataLoader(data, batch_size=batch_size, drop_last=True)
 
     # Init diffusion params
     T = 1000
@@ -47,34 +47,38 @@ if __name__ == "__main__":
     opt = torch.optim.Adam(model.parameters(), lr=0.001)
     opt.zero_grad()
 
-    # Get a sample batch
-    x = next(iter(loader))
-    t = torch.randint(low=1, high=T-200, size=(batch_size,1))
+    # # Get a sample batch
+    # x = next(iter(loader))
+    # t = torch.randint(low=1, high=T-200, size=(batch_size,1))
         
-    x_in = forward_diffusion(x, t+200, alphas_cum, device="cpu")
-    x_out = forward_diffusion(x, t, alphas_cum, device="cpu")
+    # x_in = forward_diffusion(x, t+200, alphas_cum, device="cpu")
+    # x_out = forward_diffusion(x, t, alphas_cum, device="cpu")
 
-    show_images_batch("images/x_in.png", x_in)
-    show_images_batch("images/x_out.png", x_out)
+    # show_images_batch("images/x_in.png", x_in)
+    # show_images_batch("images/x_out.png", x_out)
+
+    # train params
+    epochs = 10
     
     # train loop
-    print("num batches = ", np.ceil(len(data)/batch_size).astype(int))
-    for idx, x in enumerate(iter(loader)):
-        t = torch.randint(low=1, high=T-1, size=(batch_size,1))
-        
-        x_in = forward_diffusion(x, t+1, alphas_cum, device="cpu")
-        x_out = forward_diffusion(x, t, alphas_cum, device="cpu")
+    print("num batches = ", len(loader))
+    for e in range(epochs):
+        for idx, x in enumerate(loader):
+            t = torch.randint(low=1, high=T-1, size=(batch_size,1))
+            
+            x_in = forward_diffusion(x, t+1, alphas_cum, device="cpu")
+            x_out = forward_diffusion(x, t, alphas_cum, device="cpu")
 
-        x_denoised = model.forward(x_in, t.squeeze())
-        loss = torch.nn.MSELoss()
-        L = loss(x_out, x_denoised)
-        print(f"idx {idx} loss={L.item()}")
-        if L == torch.nan:
-            show_images_batch("images/x_in.png", x_in)
-            show_images_batch("images/x_out.png", x_out)
-            show_images_batch("images/x_denoised.png", x_denoised)
-            print("Found nan, break")
-            break
-        
-        L.backward()
-        opt.step()
+            x_denoised = model.forward(x_in, t.squeeze())
+            loss = torch.nn.MSELoss()
+            L = loss(x_out, x_denoised)
+            print(f"epoch {e} iter {idx} loss={L.item()}")
+            if L == torch.nan:
+                show_images_batch("images/x_in.png", x_in)
+                show_images_batch("images/x_out.png", x_out)
+                show_images_batch("images/x_denoised.png", x_denoised)
+                print("Found nan, break")
+                break
+            
+            L.backward()
+            opt.step()
