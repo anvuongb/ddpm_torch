@@ -69,7 +69,7 @@ if __name__ == "__main__":
     data_transform = cifar_data_transform()
     data = CifarDataset(
         img_dir="/home/anvuong/Desktop/datasets/CIFAR-10-images/train",
-        classes=["cat"],
+        classes="all",
         transform=data_transform,
     )
     loader = DataLoader(data, batch_size=batch_size, drop_last=True)
