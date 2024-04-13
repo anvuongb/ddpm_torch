@@ -6,7 +6,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
-def show_images(data: DataLoader, cols=4):
+def show_images_dataloader(out: str, data: DataLoader, cols:int=4):
     imgs = next(iter(data))
     """ Plots some samples from the dataset """
     fig = plt.figure(figsize=(15,15)) 
@@ -15,7 +15,19 @@ def show_images(data: DataLoader, cols=4):
         plt.imshow(np.array((img.permute(1,2,0)+1)/2*255, dtype=int))
         plt.axis("off")
     plt.tight_layout()
-    fig.savefig("images/collated_cifar10.png")
+    fig.savefig(out)
+
+def show_images_batch(out: str, data: torch.Tensor, cols:int=4):
+    """ Plots some samples from the dataset """
+    fig = plt.figure(figsize=(15,15)) 
+    for i in range(data.shape[0]):
+        plt.subplot(int(data.shape[0]/cols) + 1, cols, i + 1)
+        img = np.array((data[i].permute(1,2,0)+1)/2*255, dtype=int)
+        img = np.clip(img, 0, 255)
+        plt.imshow(img)
+        plt.axis("off")
+    plt.tight_layout()
+    fig.savefig(out)
 
 def cifar_data_transform(img_size=32):
     transform = [
@@ -68,4 +80,4 @@ if __name__ == "__main__":
     dataset = CifarDataset(img_dir="/home/anvuong/Desktop/datasets/CIFAR-10-images/train", classes="all", transform=data_transforms)
 
     loader = DataLoader(dataset, batch_size=32, shuffle=True)
-    show_images(loader)
+    show_images_dataloader(loader)

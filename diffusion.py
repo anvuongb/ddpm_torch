@@ -1,31 +1,35 @@
 from unet import UNet
-import torch.nn as nn
 import torch.functional as F
-import numpy as np
+from torch.utils.data import DataLoader
 import torch
-import torchvision
+import numpy as np
+from datasets import CifarDataset, cifar_data_transform, show_images_batch
 
 def get_noise_schedule(num_steps, start=0.0001, end=0.01):
     return torch.linspace(start, end, num_steps)
 
 def forward_diffusion(x_0, t, alphas_cum, device="cpu"):
-    noise = torch.rand_like(x_0)*255
-    scale_t = alphas_cum[t]
+    noise = torch.rand_like(x_0)
+    scale_t = torch.gather(alphas_cum, 1, t)
+    scale_t = scale_t[:,:,None,None]
     x_t = torch.sqrt(scale_t)*x_0 + (1-scale_t)*noise
     return x_t.to(device)
 
 if __name__ == "__main__":
+    # Init dataset
+    batch_size = 16
+    data_transform = cifar_data_transform()
+    data = CifarDataset(img_dir="/home/anvuong/Desktop/datasets/CIFAR-10-images/train", classes=["cat"], transform=data_transform)
+    loader = DataLoader(data, batch_size=batch_size)
+
+    # Init diffusion params
     T = 1000
     betas = get_noise_schedule(T)
     alphas = 1 - betas
     alphas_cum = torch.cumprod(alphas, dim=0)
-    img = torchvision.io.read_image("/home/anvuong/Desktop/datasets/CIFAR-10-images/train/cat/2000.jpg").type(torch.float32)
-    
-    t = torch.tensor([200]).to('cpu')
-    x = forward_diffusion(img, t, alphas_cum) # input
-    x_label = forward_diffusion(img, t-1, alphas_cum) # output
-    # training pair will be (img_diff, img_diff_prev)
-    
+    alphas_cum = alphas_cum.unsqueeze(0).repeat(batch_size, 1)
+
+    # Init model
     model = UNet(
         init_channels=32,
         in_channels=3,
@@ -37,18 +41,40 @@ if __name__ == "__main__":
     ).to("cpu")
     total_params = sum([p.numel() for p in model.parameters()])
     
-    torch.autograd.set_detect_anomaly(True)
+    # torch.autograd.set_detect_anomaly(True)
 
+    # Init optimizer
     opt = torch.optim.Adam(model.parameters(), lr=0.001)
     opt.zero_grad()
-    x = x[None,:,:,:]
-    # t = t[None,:]
-    print("input_shape=", x.shape)
-    x_denoised = model.forward(x, t)
-    loss = torch.sum((x_denoised - x)**2)
-    loss.backward()
 
-    opt.step()
+    # Get a sample batch
+    x = next(iter(loader))
+    t = torch.randint(low=1, high=T-200, size=(batch_size,1))
+        
+    x_in = forward_diffusion(x, t+200, alphas_cum, device="cpu")
+    x_out = forward_diffusion(x, t, alphas_cum, device="cpu")
+
+    show_images_batch("images/x_in.png", x_in)
+    show_images_batch("images/x_out.png", x_out)
     
-    img_diff = x[0].type(torch.uint8)
-    torchvision.io.write_jpeg(img_diff, "images/test_diffused.jpeg")
+    # train loop
+    print("num batches = ", np.ceil(len(data)/batch_size).astype(int))
+    for idx, x in enumerate(iter(loader)):
+        t = torch.randint(low=1, high=T-1, size=(batch_size,1))
+        
+        x_in = forward_diffusion(x, t+1, alphas_cum, device="cpu")
+        x_out = forward_diffusion(x, t, alphas_cum, device="cpu")
+
+        x_denoised = model.forward(x_in, t.squeeze())
+        loss = torch.nn.MSELoss()
+        L = loss(x_out, x_denoised)
+        print(f"idx {idx} loss={L.item()}")
+        if L == torch.nan:
+            show_images_batch("images/x_in.png", x_in)
+            show_images_batch("images/x_out.png", x_out)
+            show_images_batch("images/x_denoised.png", x_denoised)
+            print("Found nan, break")
+            break
+        
+        L.backward()
+        opt.step()
