@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 from torch import nn
-from unet import SelfAttentionBlock, ResidualBlock, UpSampleBlock, DownSampleBlock, SinusoidalPositionalEmbedding, Swiss
+from unet import SelfAttentionBlock, ResidualBlock, UpSampleBlock, DownSampleBlock, SinusoidalPositionalEmbedding, Swish
 
 # this is a simpler network construction
 # this more resembles the original UNet paper
@@ -40,7 +40,7 @@ class UNetSimple(nn.Module):
             SinusoidalPositionalEmbedding(self.time_emb_size),
             nn.Linear(self.time_emb_size, self.time_emb_size),
             # nn.ReLU(),
-            Swiss()
+            Swish()
         )
 
         # STAGE 1: Downsampling
@@ -141,6 +141,7 @@ class UNetSimple(nn.Module):
 
         # Final stage
         self.out_norm = nn.GroupNorm(num_groups=32, num_channels=block_dim_in)
+        self.swish = Swish()
         self.out_conv = nn.Conv2d(
             in_channels=block_dim_in,
             out_channels=self.out_channels,
@@ -191,13 +192,13 @@ class UNetSimple(nn.Module):
 
         # Final stage
         h = self.out_norm(h)
-        h = h * torch.sigmoid(h)
+        h = self.swish(h)
         h = self.out_conv(h)
 
         return h
     
 if __name__ == "__main__":
-    model = UNet(
+    model = UNetSimple(
         init_channels=32,
         in_channels=3,
         out_channels=3,

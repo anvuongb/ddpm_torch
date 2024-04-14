@@ -80,7 +80,7 @@ if __name__ == "__main__":
         )
 
     # Init dataset
-    batch_size = 256
+    batch_size = 512
     data_transform = cifar_data_transform()
     data = CifarDataset(
         img_dir="/home/anvuong/Desktop/datasets/CIFAR-10-images/train",
@@ -146,7 +146,7 @@ if __name__ == "__main__":
     )
 
     # train params
-    epochs = 200
+    epochs = 1000
 
     # re-init dataloader
     loader = DataLoader(data, batch_size=batch_size, drop_last=True)
@@ -173,6 +173,9 @@ if __name__ == "__main__":
             opt.step()
             tb_writer.add_scalar("loss", loss.item(), e * total + idx)
 
+            if loss.item() == torch.nan:
+                raise Exception("loss becomes nan")
+
         print(f"epoch {e} loss={loss.item()}")
         if e % 10 == 0:
             print("Generating sample images")
@@ -182,4 +185,4 @@ if __name__ == "__main__":
             )
             x_denoised = x_denoised.to("cpu")
             show_images_batch(f"sampling_images/sample_epoch_{e}.png", x_denoised)
-            save_model(f"models/{exp_name}/model_ep{e}.pkl", model)
+            save_model(f"models/{exp_name}/model.pkl", model)

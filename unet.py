@@ -123,16 +123,11 @@ class SelfAttentionBlock(nn.Module):
         attn = self.conv_out(attn)
         # print(f"    attn x_out.shape={x.shape}")
         return x + attn
+    
 
-
-def nonlinearity(x):
-    # swish
-    return x * torch.sigmoid(x)
-
-
-class Swiss(nn.Module):
+class Swish(nn.Module):
     def __init__(self):
-        super(Swiss, self).__init__()
+        super(Swish, self).__init__()
 
     def forward(self, x):
         # return x * torch.sigmoid(x)
@@ -165,7 +160,7 @@ class ResidualBlock(nn.Module):
             ),
             nn.BatchNorm2d(out_channels),
             # nn.ReLU(),
-            Swiss()
+            Swish()
         )
         self.conv2 = nn.Sequential(
             nn.Conv2d(
@@ -177,9 +172,8 @@ class ResidualBlock(nn.Module):
             ),
             nn.BatchNorm2d(out_channels),
             # nn.ReLU(),
-            Swiss()
+            Swish()
         )
-        self.relu = nn.ReLU()
         self.dropout = nn.Dropout(dropout)
         self.skip_conv = nn.Conv2d(
             in_channels=in_channels,
@@ -206,32 +200,8 @@ class ResidualBlock(nn.Module):
         if self.in_channels != self.out_channels:
             residual = self.skip_conv(residual)
         x = x + residual
-        # x = self.relu(x)
         ## print(f"    x_out.shape={x.shape}")
         return x
-
-
-# this emb is from
-# https://github.com/pesser/pytorch_diffusion/blob/master/pytorch_diffusion/model.py#L6
-# def get_timestep_embedding(timesteps, embedding_dim):
-#     """
-#     This matches the implementation in Denoising Diffusion Probabilistic Models:
-#     From Fairseq.
-#     Build sinusoidal embeddings.
-#     This matches the implementation in tensor2tensor, but differs slightly
-#     from the description in Section 3.5 of "Attention Is All You Need".
-#     """
-#     assert len(timesteps.shape) == 1
-
-#     half_dim = embedding_dim // 2
-#     emb = math.log(10000) / (half_dim - 1)
-#     emb = torch.exp(torch.arange(half_dim, dtype=torch.float32) * -emb)
-#     emb = emb.to(device=timesteps.device)
-#     emb = timesteps.float()[:, None] * emb[None, :]
-#     emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=1)
-#     if embedding_dim % 2 == 1:  # zero pad
-#         emb = torch.nn.functional.pad(emb, (0,1,0,0))
-#     return emb
 
 
 class SinusoidalPositionalEmbedding(nn.Module):
@@ -286,7 +256,7 @@ class UNet(nn.Module):
             SinusoidalPositionalEmbedding(self.time_emb_size),
             nn.Linear(self.time_emb_size, self.time_emb_size),
             # nn.ReLU(),
-            Swiss()
+            Swish()
         )
 
         # STAGE 1: Downsampling
@@ -355,18 +325,10 @@ class UNet(nn.Module):
             attn_blocks = nn.ModuleList()
             block_dim_out = self.init_channels * self.channels_multipliers[i]
             skip_dim_in = self.init_channels * self.channels_multipliers[i]
-            # skip_dim_in = 0
             # print(f"up {i} with mult={self.channels_multipliers[i]}")
-            # for j in reversed(range(self.num_res_blocks)):
             for j in range(self.num_res_blocks + 1):
                 if j == self.num_res_blocks:
                     skip_dim_in = self.init_channels * in_channels_multipliers[i]
-                # block_dim_in = block_dim_list[i * self.num_res_blocks + j][1]
-                # block_dim_out = block_dim_list[i * self.num_res_blocks + j][0]
-                # if j < self.num_res_blocks - 1:
-                #     skip_dim_in = 0
-                # fmt:off
-                # print(f"     res block {j}, c_in={block_dim_in} + {skip_dim_in}, c_out={block_dim_out}")
                 res_blocks.append(
                     ResidualBlock(
                         block_dim_in + skip_dim_in,
@@ -388,6 +350,7 @@ class UNet(nn.Module):
 
         # Final stage
         self.out_norm = nn.GroupNorm(num_groups=32, num_channels=block_dim_in)
+        self.swish = Swish()
         self.out_conv = nn.Conv2d(
             in_channels=block_dim_in,
             out_channels=self.out_channels,
@@ -406,17 +369,13 @@ class UNet(nn.Module):
 
         # STAGE 1: Downsampling
         h_list = [self.conv_init(x)]
-        # h = self.conv_init(x)
         for i in range(len(self.channels_multipliers)):
             for j in range(self.num_res_blocks):
                 h = self.down[i].res_blocks[j](h_list[-1], t_emb)
                 if len(self.down[i].attn_blocks) > 0:
                     h = self.down[i].attn_blocks[j](h)
-                # if j == self.num_res_blocks - 1:
-                #     h_list.append(h)
                 h_list.append(h)
             if i < len(self.channels_multipliers) - 1:
-                # h = self.down[i].scale(h)
                 h = self.down[i].scale(h_list[-1])
                 h_list.append(h)
 
@@ -428,23 +387,15 @@ class UNet(nn.Module):
         # STAGE 3: Upsampling
         for i in reversed(range(len(self.channels_multipliers))):
             for j in range(self.num_res_blocks + 1):
-                # if j == 0:
-                #     h = self.up[i].res_blocks[j](
-                #         torch.cat([h, h_list.pop()], dim=1), t_emb
-                #     )
-                # else:
-                #     h = self.up[i].res_blocks[j](h, t_emb)
                 h = self.up[i].res_blocks[j](torch.cat([h, h_list.pop()], dim=1), t_emb)
                 if len(self.up[i].attn_blocks) > 0:
                     h = self.up[i].attn_blocks[j](h)
-                # h_list.append(h)
             if i > 0:
                 h = self.up[i].scale(h)
-                # h_list.append(h)
 
         # Final stage
         h = self.out_norm(h)
-        h = h * torch.sigmoid(h)
+        h = self.swish(h)
         h = self.out_conv(h)
 
         return h
