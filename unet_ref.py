@@ -1,3 +1,5 @@
+# https://github.com/pesser/pytorch_diffusion/blob/master/pytorch_diffusion/model.py
+
 import math
 import torch
 import torch.nn as nn

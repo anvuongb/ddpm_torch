@@ -1,4 +1,5 @@
 from unet import UNet
+from unet_simple import UNetSimple
 import torch.functional as F
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import writer
@@ -7,10 +8,10 @@ import numpy as np
 from datasets import CifarDataset, cifar_data_transform, show_images_batch
 import tqdm
 import time
-import unet_ref
 
 
-def get_noise_schedule(num_steps, start=0.0001, end=0.01):
+
+def get_noise_schedule(num_steps, start=0.0001, end=0.02):
     return torch.linspace(start, end, num_steps)
 
 
@@ -79,18 +80,18 @@ if __name__ == "__main__":
         )
 
     # Init dataset
-    batch_size = 128
+    batch_size = 256
     data_transform = cifar_data_transform()
     data = CifarDataset(
         img_dir="/home/anvuong/Desktop/datasets/CIFAR-10-images/train",
-        classes="all",
+        classes=["cat"],
         transform=data_transform,
     )
     loader = DataLoader(data, batch_size=batch_size, drop_last=True)
 
     # Init model
     device = "cuda:1"
-    model = UNet(
+    model = UNetSimple(
         init_channels=32,
         in_channels=3,
         out_channels=3,
@@ -117,7 +118,7 @@ if __name__ == "__main__":
     total_params = sum([p.numel() for p in model.parameters()])
 
     # Init diffusion params
-    T = 1000
+    T = 500
     betas = get_noise_schedule(T)
     alphas = 1 - betas
     alphas_cum = torch.cumprod(alphas, dim=0)
@@ -147,13 +148,13 @@ if __name__ == "__main__":
     )
 
     # train params
-    epochs = 100
+    epochs = 200
 
     # re-init dataloader
     loader = DataLoader(data, batch_size=batch_size, drop_last=True)
 
     # Init optimizer
-    opt = torch.optim.Adam(model.parameters(), lr=0.001)
+    opt = torch.optim.Adam(model.parameters(), lr=1e-6)
     opt.zero_grad()
 
     # TODO: currently loss keeps increasing with epochs, shit is happening
