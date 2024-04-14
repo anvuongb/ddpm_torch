@@ -8,7 +8,7 @@ import numpy as np
 from datasets import CifarDataset, cifar_data_transform, show_images_batch
 import tqdm
 import time
-
+from model_helpers import save_model, load_model
 
 
 def get_noise_schedule(num_steps, start=0.0001, end=0.02):
@@ -116,7 +116,8 @@ if __name__ == "__main__":
     #     **cifar10_cfg
     # ).to(device)
     total_params = sum([p.numel() for p in model.parameters()])
-
+    print("Model initialized, total params = ", total_params)
+    
     # Init diffusion params
     T = 500
     betas = get_noise_schedule(T)
@@ -134,15 +135,12 @@ if __name__ == "__main__":
     x = next(iter(loader))
     t = torch.randint(low=1, high=T - 200, size=(batch_size, 1))
 
-    # x_in = forward_diffusion(x, t+200, alphas_cum, device=device)
-    # x_out = forward_diffusion(x, t, alphas_cum, device=device)
-
-    # show_images_batch("images/x_in.png", x_in)
-    # show_images_batch("images/x_out.png", x_out)
+    # Exp name
+    exp_name = "Diffusion-Cifar10-cat" 
 
     # init tensorboard writer
     current_time = time.time()
-    tb_writer = writer.SummaryWriter(f"logdir/diffusion_{current_time}")
+    tb_writer = writer.SummaryWriter(f"logdir/{exp_name}_{current_time}")
     tb_writer.add_graph(
         model=model, input_to_model=[x.to(device), t.squeeze().to(device)]
     )
@@ -176,7 +174,7 @@ if __name__ == "__main__":
             tb_writer.add_scalar("loss", loss.item(), e * total + idx)
 
         print(f"epoch {e} loss={loss.item()}")
-        if e % 5 == 0:
+        if e % 10 == 0:
             print("Generating sample images")
             x_in = torch.ones(16, *x.shape[1:])
             x_denoised = sample_from_noise(
@@ -184,3 +182,4 @@ if __name__ == "__main__":
             )
             x_denoised = x_denoised.to("cpu")
             show_images_batch(f"sampling_images/sample_epoch_{e}.png", x_denoised)
+            save_model(f"models/{exp_name}/model_ep{e}.pkl", model)

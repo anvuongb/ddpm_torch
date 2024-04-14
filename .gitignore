@@ -4,3 +4,4 @@ logdir/
 */.ipynb_checkpoints
 *.onnx
 *.sarif
+*.pkl
