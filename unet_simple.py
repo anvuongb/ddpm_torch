@@ -3,6 +3,12 @@ import torch
 from torch import nn
 from unet import SelfAttentionBlock, ResidualBlock, UpSampleBlock, DownSampleBlock, SinusoidalPositionalEmbedding, Swiss
 
+# this is a simpler network construction
+# this more resembles the original UNet paper
+# the network only performs skip connection in
+# the same resolution between the last and the first
+# ResdiualBlock
+
 class UNetSimple(nn.Module):
     def __init__(
         self,
