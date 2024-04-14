@@ -96,12 +96,11 @@ if __name__ == "__main__":
         in_channels=3,
         out_channels=3,
         num_res_blocks=2,
-        attn_resolutions=(
-            16,
-        ),
+        attn_resolutions=(16,),
         input_img_resolution=32,
         channels_multipliers=(1, 2, 2, 2),
     ).to(device)
+
     # cifar10_cfg = {
     #     "resolution": 32,
     #     "in_channels": 3,
@@ -117,7 +116,7 @@ if __name__ == "__main__":
     # ).to(device)
     total_params = sum([p.numel() for p in model.parameters()])
     print("Model initialized, total params = ", total_params)
-    
+
     # Init diffusion params
     T = 500
     betas = get_noise_schedule(T)
@@ -136,7 +135,7 @@ if __name__ == "__main__":
     t = torch.randint(low=1, high=T - 200, size=(batch_size, 1))
 
     # Exp name
-    exp_name = "Diffusion-Cifar10-cat" 
+    exp_name = "Diffusion-Cifar10-cat"
 
     # init tensorboard writer
     current_time = time.time()
@@ -146,7 +145,15 @@ if __name__ == "__main__":
     )
 
     # train params
-    epochs = 1000
+    epochs = 10000
+    start_epoch = 0
+
+    # # load from save
+    # model = load_model(
+    #     "/home/anvuong/Desktop/codes/ddpm_torch/models/Diffusion-Cifar10-cat/model.pkl",
+    #     model,
+    # )
+    # start_epoch = 0
 
     # re-init dataloader
     loader = DataLoader(data, batch_size=batch_size, drop_last=True)
@@ -159,7 +166,7 @@ if __name__ == "__main__":
     # TODO: need to fix this
     total = len(loader)
     print("num batches = ", total)
-    for e in range(epochs):
+    for e in np.arange(start_epoch, start_epoch + epochs):
         for idx, x in tqdm.tqdm(enumerate(loader), total=total):
             x = x.to(device)
             t = torch.randint(low=0, high=T, size=(batch_size, 1)).to(device)
