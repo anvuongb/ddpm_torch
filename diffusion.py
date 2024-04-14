@@ -1,11 +1,14 @@
 from unet import UNet
 import torch.functional as F
 from torch.utils.data import DataLoader
-from torch.utils.tensorboard import writer 
+from torch.utils.tensorboard import writer
 import torch
 import numpy as np
 from datasets import CifarDataset, cifar_data_transform, show_images_batch
 import tqdm
+import time
+import unet_ref
+
 
 def get_noise_schedule(num_steps, start=0.0001, end=0.01):
     return torch.linspace(start, end, num_steps)
@@ -31,26 +34,36 @@ def one_step_denoising(model, x, t, alphas_cum, alphas, betas, device="cpu"):
 
     scale_t = torch.gather(alphas_cum, 1, t)
     scale_t = scale_t[:, :, None, None]
-    
+
     z = torch.randn_like(x)
-    
+
     if t.squeeze()[0] == 0:
-        z = z*0
+        z = z * 0
 
     noise_pred = model(x, t.squeeze())
 
-    x_out = (1/torch.sqrt(alpha_t))*(x - beta_t/torch.sqrt(1-scale_t)*noise_pred) + torch.sqrt(beta_t)*z
+    x_out = (1 / torch.sqrt(alpha_t)) * (
+        x - beta_t / torch.sqrt(1 - scale_t) * noise_pred
+    ) + torch.sqrt(beta_t) * z
+
+    x_out = torch.clamp(x_out, -1, 1)
 
     return x_out.to(device)
 
 
 @torch.no_grad()
 def sample_from_noise(
-    x_0: torch.Tensor, model: UNet, timesteps: int, alphas_cum: torch.Tensor, alphas: torch.Tensor, betas: torch.Tensor, device: str = "cpu"
+    x_0: torch.Tensor,
+    model: UNet,
+    timesteps: int,
+    alphas_cum: torch.Tensor,
+    alphas: torch.Tensor,
+    betas: torch.Tensor,
+    device: str = "cpu",
 ):
     x = torch.randn_like(x_0).to(device)
     for t_ in tqdm.tqdm(reversed(range(timesteps)), total=timesteps):
-        t = torch.ones(size=(x.shape[0], 1), dtype=int)*t_
+        t = torch.ones(size=(x.shape[0], 1), dtype=int) * t_
         t = t.to(device)
         x = one_step_denoising(model, x, t, alphas_cum, alphas, betas, device=device)
     return x
@@ -81,14 +94,26 @@ if __name__ == "__main__":
         init_channels=32,
         in_channels=3,
         out_channels=3,
-        num_res_blocks=3,
+        num_res_blocks=2,
         attn_resolutions=(
             16,
-            32,
         ),
         input_img_resolution=32,
         channels_multipliers=(1, 2, 2, 2),
     ).to(device)
+    # cifar10_cfg = {
+    #     "resolution": 32,
+    #     "in_channels": 3,
+    #     "out_ch": 3,
+    #     "ch": 128,
+    #     "ch_mult": (1, 2, 2, 2),
+    #     "num_res_blocks": 2,
+    #     "attn_resolutions": (16,),
+    #     "dropout": 0.1,
+    # }
+    # model = unet_ref.UNet(
+    #     **cifar10_cfg
+    # ).to(device)
     total_params = sum([p.numel() for p in model.parameters()])
 
     # Init diffusion params
@@ -106,7 +131,7 @@ if __name__ == "__main__":
 
     # # Get a sample batch
     x = next(iter(loader))
-    t = torch.randint(low=1, high=T-200, size=(batch_size,1))
+    t = torch.randint(low=1, high=T - 200, size=(batch_size, 1))
 
     # x_in = forward_diffusion(x, t+200, alphas_cum, device=device)
     # x_out = forward_diffusion(x, t, alphas_cum, device=device)
@@ -115,8 +140,11 @@ if __name__ == "__main__":
     # show_images_batch("images/x_out.png", x_out)
 
     # init tensorboard writer
-    tb_writer = writer.SummaryWriter("logdir/diffusion")
-    tb_writer.add_graph(model=model, input_to_model=[x.to(device), t.squeeze().to(device)])
+    current_time = time.time()
+    tb_writer = writer.SummaryWriter(f"logdir/diffusion_{current_time}")
+    tb_writer.add_graph(
+        model=model, input_to_model=[x.to(device), t.squeeze().to(device)]
+    )
 
     # train params
     epochs = 100
@@ -141,15 +169,17 @@ if __name__ == "__main__":
             # x_out = forward_diffusion(x, t, alphas_cum, device=device)
 
             noise_pred = model(x_in, t.squeeze())
-            loss = torch.nn.functional.mse_loss(noise_in, noise_pred)
+            loss = torch.nn.functional.mse_loss(noise_in, noise_pred, reduction="mean")
             loss.backward()
             opt.step()
             tb_writer.add_scalar("loss", loss.item(), e * total + idx)
-    
+
         print(f"epoch {e} loss={loss.item()}")
         if e % 5 == 0:
             print("Generating sample images")
             x_in = torch.ones(16, *x.shape[1:])
-            x_denoised = sample_from_noise(x_in, model, T, alphas_cum, alphas, betas, device=device)
+            x_denoised = sample_from_noise(
+                x_in, model, T, alphas_cum, alphas, betas, device=device
+            )
             x_denoised = x_denoised.to("cpu")
             show_images_batch(f"sampling_images/sample_epoch_{e}.png", x_denoised)

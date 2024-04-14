@@ -27,12 +27,13 @@ def show_images_batch(out: str, data: torch.Tensor, cols:int=4):
         plt.imshow(img)
         plt.axis("off")
     plt.tight_layout()
-    fig.savefig(out)
+    if out is not None:
+        fig.savefig(out)
 
 def cifar_data_transform(img_size=32):
     transform = [
-        transforms.Resize((img_size, img_size)),
-        transforms.RandomHorizontalFlip(),
+        # transforms.Resize((img_size, img_size)),
+        # transforms.RandomHorizontalFlip(),
         transforms.Lambda(lambda t: t/255), # scale to [0, 1]
         transforms.Lambda(lambda t: (t * 2) - 1) # Scale between [-1, 1] 
     ]
