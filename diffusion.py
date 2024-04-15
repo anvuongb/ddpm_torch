@@ -153,6 +153,7 @@ if __name__ == "__main__":
     #     "/home/anvuong/Desktop/codes/ddpm_torch/models/Diffusion-Cifar10-cat/model.pkl",
     #     model,
     # )
+    model.load_state_dict(torch.load("/home/anvuong/Desktop/codes/ddpm_torch/models/Diffusion-Cifar10-cat/model.pkl"))
     # start_epoch = 0
 
     # re-init dataloader

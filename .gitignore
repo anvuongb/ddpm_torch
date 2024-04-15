@@ -3,5 +3,6 @@ sampling_images/
 logdir/
 */.ipynb_checkpoints
 *.onnx
+!models/Diffusion-Cifar10-cat/model.pkl
 *.sarif
 *.pkl
