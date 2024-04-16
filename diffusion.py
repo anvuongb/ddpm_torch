@@ -145,7 +145,7 @@ if __name__ == "__main__":
     )
 
     # train params
-    epochs = 10000
+    epochs = 100000
     start_epoch = 0
 
     # # load from save

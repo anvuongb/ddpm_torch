@@ -16,6 +16,7 @@ def show_images_dataloader(out: str, data: DataLoader, cols:int=4):
         plt.axis("off")
     plt.tight_layout()
     fig.savefig(out)
+    plt.close('all')
 
 def show_images_batch(out: str, data: torch.Tensor, cols:int=4):
     """ Plots some samples from the dataset """
