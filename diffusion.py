@@ -90,7 +90,7 @@ if __name__ == "__main__":
     loader = DataLoader(data, batch_size=batch_size, drop_last=True)
 
     # Init model
-    device = "cuda:1"
+    device = "cuda:0"
     model = UNetSimple(
         init_channels=32,
         in_channels=3,
@@ -153,7 +153,7 @@ if __name__ == "__main__":
     #     "/home/anvuong/Desktop/codes/ddpm_torch/models/Diffusion-Cifar10-cat/model.pkl",
     #     model,
     # )
-    model.load_state_dict(torch.load("/home/anvuong/Desktop/codes/ddpm_torch/models/Diffusion-Cifar10-cat/model.pkl"))
+    model.load_state_dict(torch.load("/home/anvuong/Desktop/codes/ddpm_torch/models/Diffusion-Cifar10-cat/model.pkl",map_location=device))
     # start_epoch = 0
 
     # re-init dataloader
@@ -185,7 +185,8 @@ if __name__ == "__main__":
                 raise Exception("loss becomes nan")
 
         print(f"epoch {e} loss={loss.item()}")
-        if e % 10 == 0:
+        # show image and save model every 100 epochs
+        if e % 100 == 0:
             print("Generating sample images")
             x_in = torch.ones(16, *x.shape[1:])
             x_denoised = sample_from_noise(
