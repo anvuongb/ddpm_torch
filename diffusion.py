@@ -25,7 +25,9 @@ def forward_diffusion(x_0, t, alphas_cum, device="cpu"):
 
 # TODO: finish this sample function
 @torch.no_grad()
-def one_step_denoising(model, x, t, alphas_cum, alphas, betas, device="cpu"):
+def one_step_denoising(
+    model, x, t, alphas_cum, alphas_cum_prev, alphas, betas, noise_sched="from_gaussian", device="cpu"
+):
 
     alpha_t = torch.gather(alphas, 1, t)
     alpha_t = alpha_t[:, :, None, None]
@@ -36,6 +38,9 @@ def one_step_denoising(model, x, t, alphas_cum, alphas, betas, device="cpu"):
     scale_t = torch.gather(alphas_cum, 1, t)
     scale_t = scale_t[:, :, None, None]
 
+    scale_t_prev = torch.gather(alphas_cum_prev, 1, t)
+    scale_t_prev = scale_t_prev[:, :, None, None]
+
     z = torch.randn_like(x)
 
     if t.squeeze()[0] == 0:
@@ -43,9 +48,17 @@ def one_step_denoising(model, x, t, alphas_cum, alphas, betas, device="cpu"):
 
     noise_pred = model(x, t.squeeze())
 
+    # noise = beta
+    noise_scale = torch.sqrt(beta_t)
+    if noise_sched == "from_gaussian":
+        # noise = scaling
+        noise_scale = torch.sqrt((1-scale_t_prev)/(1-scale_t)*beta_t)
+
     x_out = (1 / torch.sqrt(alpha_t)) * (
         x - beta_t / torch.sqrt(1 - scale_t) * noise_pred
-    ) + torch.sqrt(beta_t) * z
+    ) + noise_scale * z
+
+    # noise = beta scale
 
     x_out = torch.clamp(x_out, -1, 1)
 
@@ -58,6 +71,7 @@ def sample_from_noise(
     model: UNet,
     timesteps: int,
     alphas_cum: torch.Tensor,
+    alphas_cum_prev: torch.Tensor,
     alphas: torch.Tensor,
     betas: torch.Tensor,
     device: str = "cpu",
@@ -66,7 +80,7 @@ def sample_from_noise(
     for t_ in tqdm.tqdm(reversed(range(timesteps)), total=timesteps):
         t = torch.ones(size=(x.shape[0], 1), dtype=int) * t_
         t = t.to(device)
-        x = one_step_denoising(model, x, t, alphas_cum, alphas, betas, device=device)
+        x = one_step_denoising(model, x, t, alphas_cum, alphas_cum_prev, alphas, betas, device=device)
     return x
 
 
@@ -122,11 +136,13 @@ if __name__ == "__main__":
     betas = get_noise_schedule(T)
     alphas = 1 - betas
     alphas_cum = torch.cumprod(alphas, dim=0)
+    alphas_cum_prev = torch.cat([torch.Tensor([1.0]), alphas_cum[:-1]])
 
     # repeat into batch_size for easier indexing by t
     betas = betas.unsqueeze(0).repeat(batch_size, 1).to(device)
     alphas = alphas.unsqueeze(0).repeat(batch_size, 1).to(device)
     alphas_cum = alphas_cum.unsqueeze(0).repeat(batch_size, 1).to(device)
+    alphas_cum_prev = alphas_cum_prev.unsqueeze(0).repeat(batch_size, 1).to(device)
 
     # torch.autograd.set_detect_anomaly(True)
 
@@ -153,7 +169,12 @@ if __name__ == "__main__":
     #     "/home/anvuong/Desktop/codes/ddpm_torch/models/Diffusion-Cifar10-cat/model.pkl",
     #     model,
     # )
-    model.load_state_dict(torch.load("/home/anvuong/Desktop/codes/ddpm_torch/models/Diffusion-Cifar10-cat/model.pkl",map_location=device))
+    model.load_state_dict(
+        torch.load(
+            "/home/anvuong/Desktop/codes/ddpm_torch/models/Diffusion-Cifar10-cat/model.pkl",
+            map_location=device,
+        )
+    )
     # start_epoch = 0
 
     # re-init dataloader
@@ -190,7 +211,7 @@ if __name__ == "__main__":
             print("Generating sample images")
             x_in = torch.ones(16, *x.shape[1:])
             x_denoised = sample_from_noise(
-                x_in, model, T, alphas_cum, alphas, betas, device=device
+                x_in, model, T, alphas_cum, alphas_cum_prev, alphas, betas, device=device
             )
             x_denoised = x_denoised.to("cpu")
             show_images_batch(f"sampling_images/sample_epoch_{e}.png", x_denoised)
