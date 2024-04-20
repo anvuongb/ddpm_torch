@@ -6,3 +6,4 @@ logdir/
 !models/Diffusion-Cifar10-cat/model.pkl
 *.sarif
 *.pkl
+*.ipynb_checkpoints

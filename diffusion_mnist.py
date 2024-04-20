@@ -152,12 +152,12 @@ if __name__ == "__main__":
     start_epoch = 0
 
     # # load from save
-    # model.load_state_dict(
-    #     torch.load(
-    #         "/home/anvuong/Desktop/codes/ddpm_torch/models/Diffusion-Cifar10-cat/model.pkl",
-    #         map_location=device,
-    #     )
-    # )
+    model.load_state_dict(
+        torch.load(
+            "/home/anvuong/Desktop/codes/ddpm_torch/models/Mnist-all/model.pkl",
+            map_location=device,
+        )
+    )
     # start_epoch = 0
 
     # re-init dataloader
