@@ -142,14 +142,15 @@ if __name__ == "__main__":
 
     # init tensorboard writer
     current_time = time.time()
-    tb_writer = writer.SummaryWriter(f"logdir/{exp_name}_{current_time}")
+    # tb_writer = writer.SummaryWriter(f"logdir/{exp_name}_{current_time}")
+    tb_writer = writer.SummaryWriter("logdir/Mnist-all_1713560830.8124163")
     tb_writer.add_graph(
         model=model, input_to_model=[x.to(device), t.squeeze().to(device)]
     )
 
     # train params
     epochs = 10000
-    start_epoch = 0
+    start_epoch = 9980
 
     # # load from save
     model.load_state_dict(
@@ -198,4 +199,5 @@ if __name__ == "__main__":
             )
             x_denoised = x_denoised.to("cpu")
             show_images_batch(f"sampling_images/mnist/sample_epoch_{e}.png", x_denoised)
+            show_images_batch(f"sampling_images/mnist/latest.png", x_denoised)
             save_model(f"models/{exp_name}/model.pkl", model)
