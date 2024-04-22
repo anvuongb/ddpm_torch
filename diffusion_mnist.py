@@ -1,4 +1,5 @@
 from unet import UNet
+import os
 from unet_simple import UNetSimple
 import torch.functional as F
 from torch.utils.data import DataLoader
@@ -105,7 +106,7 @@ if __name__ == "__main__":
 
     # Init model
     device = "cuda:0"
-    model = UNetSimple(
+    model = UNet(
         init_channels=32,
         in_channels=1,
         out_channels=1,
@@ -119,7 +120,7 @@ if __name__ == "__main__":
     print("Model initialized, total params = ", total_params)
 
     # Init diffusion params
-    T = 100
+    T = 1000
     betas = get_noise_schedule(T)
     alphas = 1 - betas
     alphas_cum = torch.cumprod(alphas, dim=0)
@@ -138,24 +139,24 @@ if __name__ == "__main__":
     t = torch.randint(low=1, high=T, size=(batch_size, 1))
     print(x.shape)
     # Exp name
-    exp_name = "Mnist-all"
+    exp_name = "Mnist-all-2"
 
     # init tensorboard writer
     current_time = time.time()
     # tb_writer = writer.SummaryWriter(f"logdir/{exp_name}_{current_time}")
-    tb_writer = writer.SummaryWriter("logdir/Mnist-all_1713560830.8124163")
+    tb_writer = writer.SummaryWriter(f"logdir/{exp_name}")
     tb_writer.add_graph(
         model=model, input_to_model=[x.to(device), t.squeeze().to(device)]
     )
 
     # train params
     epochs = 10000
-    start_epoch = 9980
+    start_epoch = 21
 
-    # # load from save
+    # load from save
     model.load_state_dict(
         torch.load(
-            "/home/anvuong/Desktop/codes/ddpm_torch/models/Mnist-all/model.pkl",
+            "/home/anvuong/Desktop/codes/ddpm_torch/models/Mnist-all-2/model.pkl",
             map_location=device,
         )
     )
@@ -198,6 +199,8 @@ if __name__ == "__main__":
                 x_in, model, T, alphas_cum, alphas_cum_prev, alphas, betas, device=device
             )
             x_denoised = x_denoised.to("cpu")
-            show_images_batch(f"sampling_images/mnist/sample_epoch_{e}.png", x_denoised)
-            show_images_batch(f"sampling_images/mnist/latest.png", x_denoised)
+            if not os.path.exists(f"./sampling_images/{exp_name}"):
+                os.makedirs(f"./sampling_images/{exp_name}")
+            show_images_batch(f"sampling_images/{exp_name}/sample_epoch_{e}.png", x_denoised)
+            show_images_batch(f"sampling_images/{exp_name}/latest.png", x_denoised)
             save_model(f"models/{exp_name}/model.pkl", model)

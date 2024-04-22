@@ -5,6 +5,7 @@ logdir/
 *.onnx
 !models/Diffusion-Cifar10-cat/model.pkl
 !models/Mnist-all/model.pkl
+!models/Mnist-all-2/model.pkl
 *.sarif
 *.pkl
 *.ipynb_checkpoints
