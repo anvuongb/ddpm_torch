@@ -9,3 +9,5 @@ logdir/
 *.sarif
 *.pkl
 *.ipynb_checkpoints
+wandb/
+data/

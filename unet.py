@@ -14,18 +14,22 @@ class DownSampleBlock(nn.Module):
             in_channels=channels,
             out_channels=channels,
             kernel_size=3,
-            stride=2,
+            # stride=2,
+            stride=1,
             padding=1,
         )
+        self.down = nn.MaxPool2d(kernel_size=2, stride=2)
 
     def forward(self, x_in):
         x = x_in
         N, C, H, W = x.shape
-        if self.use_conv:
-            x = self.conv(x)
-        else:
-            down = nn.AvgPool2d(kernel_size=2, stride=2)
-            x = down(x)
+        # if self.use_conv:
+        #     x = self.conv(x)
+        # else:
+        #     down = nn.AvgPool2d(kernel_size=2, stride=2)
+        #     x = down(x)
+        x = self.conv(x)
+        x = self.down(x)
         # print(f"    down x_out.shape={x.shape}")
         assert x.shape[2] == H // 2
         assert x.shape[3] == W // 2
@@ -37,23 +41,26 @@ class UpSampleBlock(nn.Module):
     def __init__(self, channels, use_conv=True):
         super(UpSampleBlock, self).__init__()
         self.use_conv = use_conv
-        if self.use_conv:
-            self.conv = nn.Conv2d(
-                in_channels=channels,
-                out_channels=channels,
-                kernel_size=3,
-                stride=1,
-                padding=1,
-            )
+        self.conv = nn.Conv2d(
+            in_channels=channels,
+            out_channels=channels,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+        )
+        self.up = nn.ConvTranspose2d(channels, channels, 2, 2)
 
     def forward(self, x_in):
         x = x_in
         N, C, H, W = x.shape
         # resize = Resize((H * 2, W * 2))
         # x = resize(x)
-        x = torch.nn.functional.interpolate(x, scale_factor=2, mode="nearest")
-        if self.use_conv:
-            x = self.conv(x)
+        # x = torch.nn.functional.interpolate(x, scale_factor=2, mode="nearest")
+        # if self.use_conv:
+        #     x = self.conv(x)
+
+        x = self.up(x)
+        x = self.conv(x)
 
         # print(f"    up x_out.shape={x.shape}")
         assert x.shape[2] == H * 2
@@ -192,13 +199,15 @@ class ResidualBlock(nn.Module):
 
         residual = x
         x = self.conv1(x)
+        x1 = x
         t_emb = t_emb[:, :, None, None]
         x = x + t_emb
 
         x = self.dropout(x)
         x = self.conv2(x)
         if self.in_channels != self.out_channels:
-            residual = self.skip_conv(residual)
+            # residual = self.skip_conv(residual)
+            residual = x1
         x = x + residual
         ## print(f"    x_out.shape={x.shape}")
         return x

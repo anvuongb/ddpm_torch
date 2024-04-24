@@ -2,6 +2,7 @@ import torch
 from torchvision import datasets, transforms
 from torch.utils.data import Dataset, DataLoader
 from torchvision.io import read_image
+from torchvision.datasets import MNIST
 import os
 import matplotlib.pyplot as plt
 import numpy as np
@@ -23,8 +24,10 @@ def show_images_batch(out: str, data: torch.Tensor, cols:int=4):
     fig = plt.figure(figsize=(15,15)) 
     for i in range(data.shape[0]):
         plt.subplot(int(data.shape[0]/cols) + 1, cols, i + 1)
-        img = np.array((data[i].permute(1,2,0)+1)/2*255, dtype=int)
-        img = np.clip(img, 0, 255)
+        # img = np.array((data[i].permute(1,2,0)+1)/2*255, dtype=int)
+        # img = np.clip(img, 0, 255)
+        img = np.array(data[i].permute(1,2,0), dtype=int)
+        img = np.clip(img, 0, 1)
         plt.imshow(img)
         plt.axis("off")
     plt.tight_layout()
