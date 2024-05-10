@@ -11,3 +11,4 @@ logdir/
 *.ipynb_checkpoints
 wandb/
 data/
+notebooks/generated_images/

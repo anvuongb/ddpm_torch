@@ -96,10 +96,10 @@ class DDPM(nn.Module):
 def train_mnist():
     # hardcoding these here
     n_epoch = 100
-    batch_size = 256
+    batch_size = 512
     n_T = 400  # 500
     device = "cuda:0"
-    n_feat = 128  # 128 ok, 256 better (but slower)
+    n_feat = 256  # 128 ok, 256 better (but slower)
     lrate = 1e-4
     save_model = True
     save_dir = "./data/diffusion_outputs10_2/"
@@ -120,7 +120,10 @@ def train_mnist():
     ddpm.to(device)
 
     # optionally load a model
-    # ddpm.load_state_dict(torch.load("./data/diffusion_outputs/dd10pm_unet01_mnist_9.pth"))
+    load_model = "data/diffusion_outputs10_2/model_99.pth"
+    if load_model != "":
+        print(f"load model from {load_model}")
+        ddpm.load_state_dict(torch.load(load_model, map_location=device))
 
     tf = transforms.Compose(
         [transforms.ToTensor()]
@@ -133,7 +136,7 @@ def train_mnist():
     wandb.init(
         project="mnist-all-ddpm-simple",
         config={
-            # "load_model": load_model,
+            "load_model": load_model,
             "learning_rate": lrate,
             "epochs": n_epoch,
             # "start_epoch": start_epoch,
