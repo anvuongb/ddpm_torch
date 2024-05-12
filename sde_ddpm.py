@@ -11,6 +11,7 @@ import statsmodels.api as sm
 import wandb
 import pickle
 
+
 # build an extremely simple NN to predict 1D noise
 class SimpleModel(nn.Module):
     def __init__(self, hidden_units=32):
@@ -22,19 +23,21 @@ class SimpleModel(nn.Module):
         self.input_emb = nn.Sequential(
             nn.Linear(2, hidden_units),
             nn.BatchNorm1d(hidden_units),
-            nn.GELU(),
+            nn.Tanh(),
             nn.Linear(hidden_units, hidden_units),
+            nn.Tanh(),
         )
 
         self.out1 = nn.Sequential(
             nn.Linear(hidden_units, hidden_units),
             nn.BatchNorm1d(hidden_units),
-            nn.GELU(),
+            nn.Tanh(),
             nn.Linear(hidden_units, hidden_units),
+            nn.Tanh(),
         )
 
         self.out2 = nn.Sequential(
-            nn.Linear(hidden_units, hidden_units), nn.ReLU(), nn.Linear(hidden_units, 2)
+            nn.Linear(hidden_units, hidden_units), nn.Tanh(), nn.Linear(hidden_units, 2)
         )
 
     def forward(self, x, t):
@@ -128,7 +131,7 @@ class DDPM(nn.Module):
 
 
 if __name__ == "__main__":
-    
+
     with open("./data/2d_gaussians/train.pickle", "rb") as f:
         s = pickle.load(f)
 
@@ -196,4 +199,5 @@ if __name__ == "__main__":
             optim.step()
             wandb.log({"loss": loss.item()})
 
+        # if ep
     torch.save(ddpm.state_dict(), f"data/2d_gaussians/model_{n_epoch}.pth")
