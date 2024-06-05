@@ -147,7 +147,7 @@ if __name__ == "__main__":
     # loader = DataLoader(data, batch_size=batch_size, shuffle=True, num_workers=5, drop_last=True)
 
     # # Init dataset celeba
-    batch_size = 16
+    batch_size = 20
     data_transform = celeba_data_transform(128)
     data = CelebADataset(
         img_dir="/home/anvuong/Desktop/datasets/CelebA/Img/img_celeba",
@@ -196,7 +196,9 @@ if __name__ == "__main__":
     t = torch.randint(low=1, high=T, size=(batch_size, 1))
     print(x.shape)
     # Exp name
-    exp_name = "cifar-noise-removal"
+    exp_name = "celeba-noise-removal"
+    if not os.path.exists(os.path.join("models", exp_name)):
+        os.makedirs(os.path.join("models", exp_name))
 
     # init tensorboard writer
     current_time = time.time()
@@ -228,7 +230,7 @@ if __name__ == "__main__":
     )
 
     # Init optimizer
-    lr = 1e-5
+    lr = 1e-6
     opt = torch.optim.Adam(model.parameters(), lr=lr)
     # lr_schedule = LinearLR(opt, total_iters=epochs)
     opt.zero_grad()
@@ -283,6 +285,9 @@ if __name__ == "__main__":
         # lr_schedule.step()
 
         print(f"epoch {e} loss={loss.item()}")
+        if e % 1 == 0:
+            save_model(f"models/{exp_name}/model.pkl", model)
+
         # show image and save model every 100 epochs
         # if e % 1 == 0:
         #     print("Generating sample images")

@@ -6,6 +6,7 @@ from torchvision.datasets import MNIST
 import os
 import matplotlib.pyplot as plt
 import numpy as np
+import torchvision.transforms.functional as F
 
 
 def show_images_dataloader(out: str, data: DataLoader, cols: int = 4):
@@ -49,11 +50,22 @@ def cifar_data_transform(img_size=32):
     transform = transforms.Compose(transform)
     return transform
 
+class SquarePad:
+    def __call__(self, image):
+        # print(image.size())
+        _, w, h = image.size()
+        max_wh = np.max([w, h])
+        hp = int((max_wh - w) / 2)
+        vp = int((max_wh - h) / 2)
+        padding = (hp, vp, hp, vp)
+        return F.pad(image, padding, 0, 'constant')
 
 def celeba_data_transform(img_size=224):
     transform = [
+        SquarePad(),
         transforms.Grayscale(),
-        transforms.Resize((img_size, img_size)),
+        transforms.Resize(img_size),
+        transforms.CenterCrop(img_size),
         # transforms.ToTensor(),
         transforms.Lambda(lambda t: t / 255),  # scale to [0, 1]
         transforms.Lambda(lambda t: t + 1),  # Scale between [1, 2] for log
