@@ -103,8 +103,9 @@ def sample_noise_removal(
     sigmas: torch.Tensor,
     device: str = "cpu",
 ):
-    x = torch.randn_like(x_0).to(device)
-    for t_ in tqdm.tqdm(reversed(range(1, timesteps)), total=timesteps):
+    # x = torch.randn_like(x_0).to(device)
+    x = x_0
+    for t_ in tqdm.tqdm(reversed(range(1, timesteps)), total=timesteps-1):
         t = torch.ones(size=(x.shape[0], 1), dtype=int) * t_
         t = t.to(device)
         x = one_step_denoising(
@@ -201,17 +202,19 @@ if __name__ == "__main__":
 
     # train params
     epochs = 100
-    start_epoch = 0
-    # load_model = True
+    start_epoch = 10
+    load_epoch = start_epoch - 1
+    load_model = True
 
     # load from save
-    # if load_model:
-    #     model.load_state_dict(
-    #         torch.load(
-    #             "/home/anvuong/Desktop/codes/ddpm_torch/models/Mnist-all-3/model.pkl",
-    #             map_location=device,
-    #         )
-    #     )
+    if load_model:
+        print(f"loading model from epoch {load_epoch}")
+        model.load_state_dict(
+            torch.load(
+                f"models/celeba-noise-removal/model_{load_epoch}.pkl",
+                map_location=device,
+            )
+        )
     # start_epoch = 0
 
     # re-init dataloader
@@ -221,7 +224,7 @@ if __name__ == "__main__":
     )
 
     # Init optimizer
-    lr = 1e-6
+    lr = 1e-7
     opt = torch.optim.Adam(model.parameters(), lr=lr)
     # lr_schedule = LinearLR(opt, total_iters=epochs)
     opt.zero_grad()
@@ -279,7 +282,7 @@ if __name__ == "__main__":
 
         print(f"epoch {e} loss={loss.item()}")
         if e % 1 == 0:
-            save_model(f"models/{exp_name}/model.pkl", model)
+            save_model(f"models/{exp_name}/model_{e}.pkl", model)
 
         # show image and save model every 100 epochs
         if e % 1 == 0:
