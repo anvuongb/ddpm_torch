@@ -88,7 +88,7 @@ def one_step_denoising(
     noise_pred = noise_pred/var
 
     var_t = scale_t-scale_t_prev
-    x_out = 0.5*var_t*(1+2*noise_pred)+torch.sqrt(var_t)*z
+    x_out = x + 0.5*var_t*(1+2*noise_pred)+torch.sqrt(var_t)*z
 
     # noise = beta scale
 
@@ -146,17 +146,17 @@ if __name__ == "__main__":
     # loader = DataLoader(data, batch_size=batch_size, shuffle=True, num_workers=5, drop_last=True)
 
     # # Init dataset celeba
-    batch_size = 16
+    batch_size = 40
     data_transform = celeba_data_transform(128)
     data = CelebADataset(
-        img_dir="/home/anvuong/Desktop/datasets/CelebA/Img/img_celeba",
+        img_dir="/nfs/stak/users/vuonga2/datasets/img_celeba",
         transform=data_transform,
     )
     loader = DataLoader(data, batch_size=batch_size, shuffle=True, num_workers=5, drop_last=True)
 
 
     # Init model
-    device = "cuda:1"
+    device = "cuda:0"
     unet_conf = {
         "init_channels": 64,
         "in_channels": 1,
