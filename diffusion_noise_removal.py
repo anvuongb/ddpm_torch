@@ -21,7 +21,7 @@ from PIL import Image
 def save_image_2(
     tensor,
     fp,
-    format,
+    format=None,
     **kwargs,
 ) -> None:
     """
@@ -146,7 +146,7 @@ if __name__ == "__main__":
     # loader = DataLoader(data, batch_size=batch_size, shuffle=True, num_workers=5, drop_last=True)
 
     # # Init dataset celeba
-    batch_size = 20
+    batch_size = 16
     data_transform = celeba_data_transform(128)
     data = CelebADataset(
         img_dir="/home/anvuong/Desktop/datasets/CelebA/Img/img_celeba",
