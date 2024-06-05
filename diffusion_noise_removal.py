@@ -6,7 +6,7 @@ import torch.functional as F
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import writer
 from torchvision.datasets import MNIST
-from torchvision.utils import save_image
+from torchvision.utils import save_image, make_grid
 import torch
 import numpy as np
 from datasets import MnistDataset, mnist_data_transform, show_images_batch, cifar_data_transform, CifarDataset, celeba_data_transform, CelebADataset
@@ -15,7 +15,32 @@ import tqdm
 import time
 from model_helpers import save_model, load_model
 import wandb
+from PIL import Image
 
+@torch.no_grad()
+def save_image_2(
+    tensor,
+    fp,
+    format,
+    **kwargs,
+) -> None:
+    """
+    Save a given Tensor into an image file.
+
+    Args:
+        tensor (Tensor or list): Image to be saved. If given a mini-batch tensor,
+            saves the tensor as a grid of images by calling ``make_grid``.
+        fp (string or file object): A filename or a file object
+        format(Optional):  If omitted, the format to use is determined from the filename extension.
+            If a file object was used instead of a filename, this parameter should always be used.
+        **kwargs: Other arguments are documented in ``make_grid``.
+    """
+
+    grid = make_grid(tensor, **kwargs)
+    # Add 0.5 after unnormalizing to [0, 255] to round to the nearest integer
+    ndarr = grid.sub_(1).mul(255).add_(0.5).clamp_(0, 255).permute(1, 2, 0).to("cpu", torch.uint8).numpy()
+    im = Image.fromarray(ndarr)
+    im.save(fp, format=format)
 
 def get_noise_schedule(num_steps, start=0.0001, end=0.02):
     return torch.linspace(start, end, num_steps)
@@ -219,8 +244,6 @@ if __name__ == "__main__":
         pbar = tqdm.tqdm(enumerate(loader), total=total)
         for idx, x in pbar:
             x = x[0]
-            if idx == 5:
-                break
             x = x.to(device)
             t = torch.randint(low=0, high=T, size=(batch_size, 1)).to(device)
 
@@ -246,6 +269,8 @@ if __name__ == "__main__":
             
             # log to wandb
             wandb.log({"loss": loss.item()})
+            # if idx == 5:
+            #     break
 
         # linear lrate decay
         opt.param_groups[0]["lr"] = lr * (1 - e / epochs)
@@ -258,27 +283,34 @@ if __name__ == "__main__":
         # show image and save model every 100 epochs
         if e % 1 == 0:
             print("Generating sample images")
-            # x_in = torch.ones(16, *x.shape[1:])
-            x_in = x[0]
-            x_in = x_in[None, :, :, :]
-            # print(x_in.shape)
-            K = t[0][0].to('cpu').item()
-            x_denoised = sample_noise_removal(
-                x_in,
-                model,
-                K,
-                sigmas,
-                device=device,
-            )
-            x_denoised = x_denoised.to("cpu")
-            x_denoised = torch.clamp((torch.exp(x_denoised)-1)*255, 0, 255)
+            save_image_2(x, f"sampling_images/{exp_name}/original_epoch_{e}.png")
+            x_noised = torch.exp(log_x_in)
+            save_image_2(x_noised, f"sampling_images/{exp_name}/noised_epoch_{e}.png")
+            xs = []
+            for j in range(batch_size):
+                # x_in = torch.ones(16, *x.shape[1:])
+                x_in = log_x_in[j]
+                x_in = x_in[None, :, :, :]
+                # print(x_in.shape)
+                K = t[j][0].to('cpu').item()
+                x_denoised = sample_noise_removal(
+                    x_in,
+                    model,
+                    K,
+                    sigmas,
+                    device=device,
+                )
+                x_denoised = x_denoised.to("cpu")
+                x_denoised = torch.exp(x_denoised)
+                xs.append(x_denoised)
+            xs = torch.cat(xs)
             if not os.path.exists(f"./sampling_images/{exp_name}"):
                 os.makedirs(f"./sampling_images/{exp_name}")
             # show_images_batch(
             #     f"sampling_images/{exp_name}/sample_epoch_{e}.png", x_denoised
             # )
             # show_images_batch(f"sampling_images/{exp_name}/latest.png", x_denoised)
-            save_image(x_denoised, f"sampling_images/{exp_name}/sample_epoch_{e}.png")
-            save_image(x_denoised, f"sampling_images/{exp_name}/latest.png")
+            save_image(xs, f"sampling_images/{exp_name}/sample_epoch_{e}.png")
+            save_image(xs, f"sampling_images/{exp_name}/latest.png")
             wandb.save(f"sampling_images/{exp_name}/*.png")
             save_model(f"models/{exp_name}/model.pkl", model)
