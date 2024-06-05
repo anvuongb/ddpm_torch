@@ -189,7 +189,8 @@ if __name__ == "__main__":
     exp_name = "celeba-noise-removal"
     if not os.path.exists(os.path.join("models", exp_name)):
         os.makedirs(os.path.join("models", exp_name))
-
+    if not os.path.exists(f"./sampling_images/{exp_name}"):
+        os.makedirs(f"./sampling_images/{exp_name}")
     # init tensorboard writer
     current_time = time.time()
     # tb_writer = writer.SummaryWriter(f"logdir/{exp_name}_{current_time}")
@@ -304,8 +305,6 @@ if __name__ == "__main__":
                 x_denoised = torch.exp(x_denoised)
                 xs.append(x_denoised)
             xs = torch.cat(xs)
-            if not os.path.exists(f"./sampling_images/{exp_name}"):
-                os.makedirs(f"./sampling_images/{exp_name}")
             # show_images_batch(
             #     f"sampling_images/{exp_name}/sample_epoch_{e}.png", x_denoised
             # )
