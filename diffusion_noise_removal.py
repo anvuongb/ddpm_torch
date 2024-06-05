@@ -20,14 +20,6 @@ import wandb
 def get_noise_schedule(num_steps, start=0.0001, end=0.02):
     return torch.linspace(start, end, num_steps)
 
-
-# def forward_diffusion(x_0, t, alphas_cum, device="cpu"):
-#     noise = torch.randn_like(x_0).to(device)
-#     scale_t = torch.gather(alphas_cum, 1, t)
-#     scale_t = scale_t[:, :, None, None]
-#     x_t = torch.sqrt(scale_t) * x_0 + (1 - scale_t) * noise
-#     return x_t.to(device), noise
-
 def forward_diffusion_gbm(x_0, t, sigmas, device="cpu"):
     noise = torch.randn_like(x_0).to(device)
 
@@ -39,9 +31,9 @@ def forward_diffusion_gbm(x_0, t, sigmas, device="cpu"):
     scale_0 = scale_0[:, :, None, None]
 
     mean = log_x0 -0.5*(scale_t - scale_0)
-    var = torch.sqrt(scale_t-scale_0)*noise
-    log_xt = mean + var
-    return log_xt.to(device), noise
+    var = torch.sqrt(scale_t-scale_0)
+    log_xt = mean + var*noise
+    return log_xt.to(device), noise, var
 
 
 # TODO: finish this sample function
@@ -50,43 +42,28 @@ def one_step_denoising(
     model,
     x,
     t,
-    alphas_cum,
-    alphas_cum_prev,
-    alphas,
-    betas,
-    noise_sched="from_gaussian",
+    sigmas,
     device="cpu",
 ):
-
-    alpha_t = torch.gather(alphas, 1, t)
-    alpha_t = alpha_t[:, :, None, None]
-
-    beta_t = torch.gather(betas, 1, t)
-    beta_t = beta_t[:, :, None, None]
-
-    scale_t = torch.gather(alphas_cum, 1, t)
+    scale_t = torch.gather(sigmas, 1, t)
     scale_t = scale_t[:, :, None, None]
 
-    scale_t_prev = torch.gather(alphas_cum_prev, 1, t)
+    scale_0 = torch.gather(sigmas, 1, torch.zeros_like(t))
+    scale_0 = scale_0[:, :, None, None]
+
+    scale_t_prev = torch.gather(sigmas, 1, t-1)
     scale_t_prev = scale_t_prev[:, :, None, None]
 
     z = torch.randn_like(x)
 
-    if t.squeeze()[0] == 0:
-        z = z * 0
-
-    noise_pred = model(x, t.squeeze())
+    # print(t)
+    var = torch.sqrt(scale_t-scale_0)
+    noise_pred = model(x, t[0])
     noise_pred = torch.clamp(noise_pred, -1, 1)
+    noise_pred = noise_pred/var
 
-    # noise = beta
-    noise_scale = torch.sqrt(beta_t)
-    # if noise_sched == "from_gaussian":
-    #     # noise = scaling
-    #     noise_scale = torch.sqrt((1 - scale_t_prev) / (1 - scale_t) * beta_t)
-
-    x_out = (1 / torch.sqrt(alpha_t)) * (
-        x - beta_t / torch.sqrt(1 - scale_t) * noise_pred
-    ) + noise_scale * z
+    var_t = scale_t-scale_t_prev
+    x_out = 0.5*var_t*(1+2*noise_pred)+torch.sqrt(var_t)*z
 
     # noise = beta scale
 
@@ -94,22 +71,19 @@ def one_step_denoising(
 
 
 @torch.no_grad()
-def sample_from_noise(
+def sample_noise_removal(
     x_0: torch.Tensor,
     model: UNet,
     timesteps: int,
-    alphas_cum: torch.Tensor,
-    alphas_cum_prev: torch.Tensor,
-    alphas: torch.Tensor,
-    betas: torch.Tensor,
+    sigmas: torch.Tensor,
     device: str = "cpu",
 ):
     x = torch.randn_like(x_0).to(device)
-    for t_ in tqdm.tqdm(reversed(range(timesteps)), total=timesteps):
+    for t_ in tqdm.tqdm(reversed(range(1, timesteps)), total=timesteps):
         t = torch.ones(size=(x.shape[0], 1), dtype=int) * t_
         t = t.to(device)
         x = one_step_denoising(
-            model, x, t, alphas_cum, alphas_cum_prev, alphas, betas, device=device
+            model, x, t, sigmas, device=device
         )
     return x
 
@@ -175,17 +149,8 @@ if __name__ == "__main__":
     # Init diffusion params
     T = 500
     sigmas = get_noise_schedule(T)
-    betas = get_noise_schedule(T)
-    alphas = 1 - betas
-    alphas_cum = torch.cumprod(alphas, dim=0)
-    alphas_cum_prev = torch.cat([torch.Tensor([1.0]), alphas_cum[:-1]])
-
     # repeat into batch_size for easier indexing by t
     sigmas = sigmas.unsqueeze(0).repeat(batch_size, 1).to(device)
-    betas = betas.unsqueeze(0).repeat(batch_size, 1).to(device)
-    alphas = alphas.unsqueeze(0).repeat(batch_size, 1).to(device)
-    alphas_cum = alphas_cum.unsqueeze(0).repeat(batch_size, 1).to(device)
-    alphas_cum_prev = alphas_cum_prev.unsqueeze(0).repeat(batch_size, 1).to(device)
 
     # torch.autograd.set_detect_anomaly(True)
 
@@ -254,10 +219,12 @@ if __name__ == "__main__":
         pbar = tqdm.tqdm(enumerate(loader), total=total)
         for idx, x in pbar:
             x = x[0]
+            if idx == 5:
+                break
             x = x.to(device)
             t = torch.randint(low=0, high=T, size=(batch_size, 1)).to(device)
 
-            log_x_in, noise_in = forward_diffusion_gbm(x, t, sigmas, device=device)
+            log_x_in, noise_in, var_in = forward_diffusion_gbm(x, t, sigmas, device=device)
             # x_in, noise_in = forward_diffusion(x, t, alphas_cum, device=device)
             # x_out = forward_diffusion(x, t, alphas_cum, device=device)
 
@@ -289,27 +256,29 @@ if __name__ == "__main__":
             save_model(f"models/{exp_name}/model.pkl", model)
 
         # show image and save model every 100 epochs
-        # if e % 1 == 0:
-        #     print("Generating sample images")
-        #     x_in = torch.ones(16, *x.shape[1:])
-        #     x_denoised = sample_from_noise(
-        #         x_in,
-        #         model,
-        #         T,
-        #         alphas_cum,
-        #         alphas_cum_prev,
-        #         alphas,
-        #         betas,
-        #         device=device,
-        #     )
-        #     x_denoised = x_denoised.to("cpu")
-        #     if not os.path.exists(f"./sampling_images/{exp_name}"):
-        #         os.makedirs(f"./sampling_images/{exp_name}")
-        #     # show_images_batch(
-        #     #     f"sampling_images/{exp_name}/sample_epoch_{e}.png", x_denoised
-        #     # )
-        #     # show_images_batch(f"sampling_images/{exp_name}/latest.png", x_denoised)
-        #     save_image(x_denoised, f"sampling_images/{exp_name}/sample_epoch_{e}.png")
-        #     save_image(x_denoised, f"sampling_images/{exp_name}/latest.png")
-        #     wandb.save(f"sampling_images/{exp_name}/*.png")
-        #     save_model(f"models/{exp_name}/model.pkl", model)
+        if e % 1 == 0:
+            print("Generating sample images")
+            # x_in = torch.ones(16, *x.shape[1:])
+            x_in = x[0]
+            x_in = x_in[None, :, :, :]
+            # print(x_in.shape)
+            K = t[0][0].to('cpu').item()
+            x_denoised = sample_noise_removal(
+                x_in,
+                model,
+                K,
+                sigmas,
+                device=device,
+            )
+            x_denoised = x_denoised.to("cpu")
+            x_denoised = torch.clamp((torch.exp(x_denoised)-1)*255, 0, 255)
+            if not os.path.exists(f"./sampling_images/{exp_name}"):
+                os.makedirs(f"./sampling_images/{exp_name}")
+            # show_images_batch(
+            #     f"sampling_images/{exp_name}/sample_epoch_{e}.png", x_denoised
+            # )
+            # show_images_batch(f"sampling_images/{exp_name}/latest.png", x_denoised)
+            save_image(x_denoised, f"sampling_images/{exp_name}/sample_epoch_{e}.png")
+            save_image(x_denoised, f"sampling_images/{exp_name}/latest.png")
+            wandb.save(f"sampling_images/{exp_name}/*.png")
+            save_model(f"models/{exp_name}/model.pkl", model)
