@@ -191,21 +191,21 @@ class AttnBlock(nn.Module):
 
 
 class UNet(nn.Module):
-    def __init__(self, *, ch, out_ch, ch_mult=(1,2,4,8), num_res_blocks,
+    def __init__(self, *, init_channels, out_channels, channels_multipliers=(1,2,4,8), num_res_blocks,
                  attn_resolutions, dropout=0.0, resamp_with_conv=True, in_channels,
-                 resolution):
+                 input_img_resolution):
         super().__init__()
-        self.ch = ch
-        self.temb_ch = self.ch*4
-        self.num_resolutions = len(ch_mult)
+        self.init_channels = init_channels
+        self.temb_ch = self.init_channels*4
+        self.num_resolutions = len(channels_multipliers)
         self.num_res_blocks = num_res_blocks
-        self.resolution = resolution
+        self.input_img_resolution = input_img_resolution
         self.in_channels = in_channels
 
         # timestep embedding
         self.temb = nn.Module()
         self.temb.dense = nn.ModuleList([
-            torch.nn.Linear(self.ch,
+            torch.nn.Linear(self.init_channels,
                             self.temb_ch),
             torch.nn.Linear(self.temb_ch,
                             self.temb_ch),
@@ -213,19 +213,19 @@ class UNet(nn.Module):
 
         # downsampling
         self.conv_in = torch.nn.Conv2d(in_channels,
-                                       self.ch,
+                                       self.init_channels,
                                        kernel_size=3,
                                        stride=1,
                                        padding=1)
 
-        curr_res = resolution
-        in_ch_mult = (1,)+ch_mult
+        curr_res = input_img_resolution
+        in_ch_mult = (1,)+channels_multipliers
         self.down = nn.ModuleList()
         for i_level in range(self.num_resolutions):
             block = nn.ModuleList()
             attn = nn.ModuleList()
-            block_in = ch*in_ch_mult[i_level]
-            block_out = ch*ch_mult[i_level]
+            block_in = init_channels*in_ch_mult[i_level]
+            block_out = init_channels*channels_multipliers[i_level]
             for i_block in range(self.num_res_blocks):
                 block.append(ResnetBlock(in_channels=block_in,
                                          out_channels=block_out,
@@ -259,11 +259,11 @@ class UNet(nn.Module):
         for i_level in reversed(range(self.num_resolutions)):
             block = nn.ModuleList()
             attn = nn.ModuleList()
-            block_out = ch*ch_mult[i_level]
-            skip_in = ch*ch_mult[i_level]
+            block_out = init_channels*channels_multipliers[i_level]
+            skip_in = init_channels*channels_multipliers[i_level]
             for i_block in range(self.num_res_blocks+1):
                 if i_block == self.num_res_blocks:
-                    skip_in = ch*in_ch_mult[i_level]
+                    skip_in = init_channels*in_ch_mult[i_level]
                 block.append(ResnetBlock(in_channels=block_in+skip_in,
                                          out_channels=block_out,
                                          temb_channels=self.temb_ch,
@@ -282,17 +282,17 @@ class UNet(nn.Module):
         # end
         self.norm_out = Normalize(block_in)
         self.conv_out = torch.nn.Conv2d(block_in,
-                                        out_ch,
+                                        out_channels,
                                         kernel_size=3,
                                         stride=1,
                                         padding=1)
 
 
     def forward(self, x, t):
-        assert x.shape[2] == x.shape[3] == self.resolution
+        assert x.shape[2] == x.shape[3] == self.input_img_resolution
 
         # timestep embedding
-        temb = get_timestep_embedding(t, self.ch)
+        temb = get_timestep_embedding(t, self.init_channels)
         temb = self.temb.dense[0](temb)
         temb = nonlinearity(temb)
         temb = self.temb.dense[1](temb)

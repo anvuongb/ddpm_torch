@@ -1,4 +1,5 @@
-from unet import UNet
+# from unet import UNet
+from unet_ref import UNet
 from torchvision import transforms
 import os
 from unet_simple import UNetSimple
@@ -9,13 +10,22 @@ from torchvision.datasets import MNIST
 from torchvision.utils import save_image, make_grid
 import torch
 import numpy as np
-from datasets import MnistDataset, mnist_data_transform, show_images_batch, cifar_data_transform, CifarDataset, celeba_data_transform, CelebADataset
+from datasets import (
+    MnistDataset,
+    mnist_data_transform,
+    show_images_batch,
+    cifar_data_transform,
+    CifarDataset,
+    celeba_data_transform,
+    CelebADataset,
+)
 from torch.optim.lr_scheduler import LinearLR
 import tqdm
 import time
 from model_helpers import save_model, load_model
 import wandb
 from PIL import Image
+
 
 @torch.no_grad()
 def save_image_2(
@@ -38,26 +48,36 @@ def save_image_2(
 
     grid = make_grid(tensor, **kwargs)
     # Add 0.5 after unnormalizing to [0, 255] to round to the nearest integer
-    ndarr = grid.sub_(1).mul(255).add_(0.5).clamp_(0, 255).permute(1, 2, 0).to("cpu", torch.uint8).numpy()
+    ndarr = (
+        grid.sub_(1)
+        .mul(255)
+        .add_(0.5)
+        .clamp_(0, 255)
+        .permute(1, 2, 0)
+        .to("cpu", torch.uint8)
+        .numpy()
+    )
     im = Image.fromarray(ndarr)
     im.save(fp, format=format)
 
+
 def get_noise_schedule(num_steps, start=0.0001, end=0.02):
     return torch.linspace(start, end, num_steps)
+
 
 def forward_diffusion_gbm(x_0, t, sigmas, device="cpu"):
     noise = torch.randn_like(x_0).to(device)
 
     log_x0 = torch.log(x_0)
-    
+
     scale_t = torch.gather(sigmas, 1, t)
     scale_t = scale_t[:, :, None, None]
     scale_0 = torch.gather(sigmas, 1, torch.zeros_like(t))
     scale_0 = scale_0[:, :, None, None]
 
-    mean = log_x0 -0.5*(scale_t - scale_0)
-    var = torch.sqrt(scale_t-scale_0)
-    log_xt = mean + var*noise
+    var = scale_t - scale_0
+    mean = log_x0 - 0.5 * var
+    log_xt = mean + torch.sqrt(var) * noise
     return log_xt.to(device), noise, var
 
 
@@ -70,26 +90,25 @@ def one_step_denoising(
     sigmas,
     device="cpu",
 ):
-    scale_t = torch.gather(sigmas, 1, t)
+    scale_t = torch.gather(sigmas, 1, t+1)
     scale_t = scale_t[:, :, None, None]
 
     scale_0 = torch.gather(sigmas, 1, torch.zeros_like(t))
     scale_0 = scale_0[:, :, None, None]
 
-    scale_t_prev = torch.gather(sigmas, 1, t-1)
+    scale_t_prev = torch.gather(sigmas, 1, t)
     scale_t_prev = scale_t_prev[:, :, None, None]
 
     z = torch.randn_like(x)
 
-    # print(t)
-    var = torch.sqrt(scale_t-scale_0)
     noise_pred = model(x, t[0])
-    noise_pred = torch.clamp(noise_pred, -1, 1)
-    noise_pred = noise_pred/var
 
-    var_t = scale_t-scale_t_prev
-    x_out = x + 0.5*var_t*(1+2*noise_pred)+torch.sqrt(var_t)*z
+    var = scale_t - scale_0
+    var_t = scale_t - scale_t_prev
+    mean = x + 0.5 * var_t
 
+    x_out = mean + var_t/torch.sqrt(var) * noise_pred + torch.sqrt(var_t) * z
+    x_out = torch.clamp(x_out, 0, np.log(2))  # clip to valid range
     # noise = beta scale
 
     return x_out.to(device)
@@ -105,12 +124,10 @@ def sample_noise_removal(
 ):
     # x = torch.randn_like(x_0).to(device)
     x = x_0
-    for t_ in tqdm.tqdm(reversed(range(1, timesteps)), total=timesteps-1):
+    for t_ in tqdm.tqdm(reversed(range(timesteps-1)), total=timesteps - 1):
         t = torch.ones(size=(x.shape[0], 1), dtype=int) * t_
         t = t.to(device)
-        x = one_step_denoising(
-            model, x, t, sigmas, device=device
-        )
+        x = one_step_denoising(model, x, t, sigmas, device=device)
     return x
 
 
@@ -147,25 +164,39 @@ if __name__ == "__main__":
     # loader = DataLoader(data, batch_size=batch_size, shuffle=True, num_workers=5, drop_last=True)
 
     # # Init dataset celeba
-    batch_size = 40
+    batch_size = 16
     data_transform = celeba_data_transform(128)
     data = CelebADataset(
-        img_dir="/nfs/stak/users/vuonga2/datasets/img_celeba",
+        # img_dir="/nfs/stak/users/vuonga2/datasets/img_celeba",
+        img_dir="/nfs/stak/users/vuonga2/datasets/img_celeba_small",
         transform=data_transform,
     )
-    loader = DataLoader(data, batch_size=batch_size, shuffle=True, num_workers=5, drop_last=True)
-
+    loader = DataLoader(
+        data, batch_size=batch_size, shuffle=True, num_workers=5, drop_last=True
+    )
 
     # Init model
     device = "cuda:0"
+    # unet_conf = {
+    #     "init_channels": 64,
+    #     "in_channels": 1,
+    #     "out_channels": 1,
+    #     "num_res_blocks": 2,
+    #     "attn_resolutions": (
+    #         64,
+    #         16,
+    #     ),
+    #     "input_img_resolution": 128,
+    #     "channels_multipliers": (1, 2, 4, 8),
+    # }
     unet_conf = {
-        "init_channels": 64,
+        "init_channels": 128,
         "in_channels": 1,
         "out_channels": 1,
         "num_res_blocks": 2,
-        "attn_resolutions": (32, 16,),
+        "attn_resolutions": (16,),
         "input_img_resolution": 128,
-        "channels_multipliers": (2, 2, 2),
+        "channels_multipliers": (1, 2, 4),
     }
     model = UNet(**unet_conf).to(device)
 
@@ -187,7 +218,7 @@ if __name__ == "__main__":
     t = torch.randint(low=1, high=T, size=(batch_size, 1))
     print(x.shape)
     # Exp name
-    exp_name = "celeba-noise-removal"
+    exp_name = "celeba-small-noise-removal"
     if not os.path.exists(os.path.join("models", exp_name)):
         os.makedirs(os.path.join("models", exp_name))
     if not os.path.exists(f"./sampling_images/{exp_name}"):
@@ -202,19 +233,19 @@ if __name__ == "__main__":
 
     # train params
     epochs = 100
-    start_epoch = 10
+    start_epoch = 0
     load_epoch = start_epoch - 1
-    load_model = True
+    load_model = False
 
-    # load from save
-    if load_model:
-        print(f"loading model from epoch {load_epoch}")
-        model.load_state_dict(
-            torch.load(
-                f"models/celeba-noise-removal/model_{load_epoch}.pkl",
-                map_location=device,
-            )
-        )
+    # # load from save
+    # if load_model:
+    #     print(f"loading model from epoch {load_epoch}")
+    #     model.load_state_dict(
+    #         torch.load(
+    #             f"models/celeba-noise-removal/model_{load_epoch}.pkl",
+    #             map_location=device,
+    #         )
+    #     )
     # start_epoch = 0
 
     # re-init dataloader
@@ -224,7 +255,7 @@ if __name__ == "__main__":
     )
 
     # Init optimizer
-    lr = 1e-7
+    lr = 1e-6
     opt = torch.optim.Adam(model.parameters(), lr=lr)
     # lr_schedule = LinearLR(opt, total_iters=epochs)
     opt.zero_grad()
@@ -234,7 +265,7 @@ if __name__ == "__main__":
     total = len(loader)
     print("num batches = ", total)
     wandb.init(
-        project="noise-removal",
+        project=exp_name,
         config={
             "load_model": load_model,
             "learning_rate": lr,
@@ -251,12 +282,16 @@ if __name__ == "__main__":
             x = x.to(device)
             t = torch.randint(low=0, high=T, size=(batch_size, 1)).to(device)
 
-            log_x_in, noise_in, var_in = forward_diffusion_gbm(x, t, sigmas, device=device)
+            log_x_in, noise_in, var_in = forward_diffusion_gbm(
+                x, t, sigmas, device=device
+            )
             # x_in, noise_in = forward_diffusion(x, t, alphas_cum, device=device)
             # x_out = forward_diffusion(x, t, alphas_cum, device=device)
 
             noise_pred = model(log_x_in, t.squeeze())
-            loss = torch.nn.functional.mse_loss(noise_in, noise_pred, reduction="mean")
+            loss = torch.nn.functional.mse_loss(
+                noise_in, noise_pred, reduction="mean"
+            )
             loss.backward()
             tb_writer.add_scalar("loss", loss.item(), e * total + idx)
 
@@ -270,7 +305,7 @@ if __name__ == "__main__":
             pbar.set_description(f"loss: {loss_ema:.4f}")
 
             opt.step()
-            
+
             # log to wandb
             wandb.log({"loss": loss.item()})
             # if idx == 5:
@@ -296,7 +331,7 @@ if __name__ == "__main__":
                 x_in = log_x_in[j]
                 x_in = x_in[None, :, :, :]
                 # print(x_in.shape)
-                K = t[j][0].to('cpu').item()
+                K = t[j][0].to("cpu").item()
                 x_denoised = sample_noise_removal(
                     x_in,
                     model,
