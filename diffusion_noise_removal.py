@@ -90,7 +90,7 @@ def one_step_denoising(
     sigmas,
     device="cpu",
 ):
-    scale_t = torch.gather(sigmas, 1, t+1)
+    scale_t = torch.gather(sigmas, 1, t + 1)
     scale_t = scale_t[:, :, None, None]
 
     scale_0 = torch.gather(sigmas, 1, torch.zeros_like(t))
@@ -102,6 +102,7 @@ def one_step_denoising(
     z = torch.randn_like(x)
 
     noise_pred = model(x, t[0])
+    noise_pred = torch.clamp(noise_pred, -1, 1)
 
     var = scale_t - scale_0
     var_t = scale_t - scale_t_prev
@@ -109,7 +110,6 @@ def one_step_denoising(
 
     x_out = mean + var_t/torch.sqrt(var) * noise_pred + torch.sqrt(var_t) * z
     x_out = torch.clamp(x_out, 0, np.log(2))  # clip to valid range
-    # noise = beta scale
 
     return x_out.to(device)
 
@@ -124,7 +124,7 @@ def sample_noise_removal(
 ):
     # x = torch.randn_like(x_0).to(device)
     x = x_0
-    for t_ in tqdm.tqdm(reversed(range(timesteps-1)), total=timesteps - 1):
+    for t_ in tqdm.tqdm(reversed(range(timesteps - 1)), total=timesteps - 1):
         t = torch.ones(size=(x.shape[0], 1), dtype=int) * t_
         t = t.to(device)
         x = one_step_denoising(model, x, t, sigmas, device=device)
@@ -164,8 +164,8 @@ if __name__ == "__main__":
     # loader = DataLoader(data, batch_size=batch_size, shuffle=True, num_workers=5, drop_last=True)
 
     # # Init dataset celeba
-    batch_size = 16
-    data_transform = celeba_data_transform(128)
+    batch_size = 8
+    data_transform = celeba_data_transform(224)
     data = CelebADataset(
         # img_dir="/nfs/stak/users/vuonga2/datasets/img_celeba",
         img_dir="/nfs/stak/users/vuonga2/datasets/img_celeba_small",
@@ -195,8 +195,8 @@ if __name__ == "__main__":
         "out_channels": 1,
         "num_res_blocks": 2,
         "attn_resolutions": (16,),
-        "input_img_resolution": 128,
-        "channels_multipliers": (1, 2, 4),
+        "input_img_resolution": 224,
+        "channels_multipliers": (1, 1, 2, 2, 4, 4),
     }
     model = UNet(**unet_conf).to(device)
 
@@ -274,6 +274,8 @@ if __name__ == "__main__":
             "unet_config": unet_conf,
         },
     )
+
+    # mixed precision
     for e in np.arange(start_epoch, start_epoch + epochs):
         loss_ema = None
         pbar = tqdm.tqdm(enumerate(loader), total=total)
@@ -289,9 +291,7 @@ if __name__ == "__main__":
             # x_out = forward_diffusion(x, t, alphas_cum, device=device)
 
             noise_pred = model(log_x_in, t.squeeze())
-            loss = torch.nn.functional.mse_loss(
-                noise_in, noise_pred, reduction="mean"
-            )
+            loss = torch.nn.functional.mse_loss(noise_in, noise_pred, reduction="mean")
             loss.backward()
             tb_writer.add_scalar("loss", loss.item(), e * total + idx)
 
