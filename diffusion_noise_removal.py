@@ -19,7 +19,7 @@ from datasets import (
     celeba_data_transform,
     CelebADataset,
 )
-from torch.optim.lr_scheduler import LinearLR
+from torch.optim.lr_scheduler import LinearLR, ReduceLROnPlateau
 import tqdm
 import time
 from model_helpers import save_model, load_model
@@ -65,10 +65,8 @@ def get_noise_schedule(num_steps, start=0.0001, end=0.02):
     return torch.linspace(start, end, num_steps)
 
 
-def forward_diffusion_gbm(x_0, t, sigmas, device="cpu"):
-    noise = torch.randn_like(x_0).to(device)
-
-    log_x0 = torch.log(x_0)
+def forward_diffusion_gbm(log_x0, t, sigmas, device="cpu"):
+    noise = torch.randn_like(log_x0).to(device)
 
     scale_t = torch.gather(sigmas, 1, t)
     scale_t = scale_t[:, :, None, None]
@@ -76,8 +74,10 @@ def forward_diffusion_gbm(x_0, t, sigmas, device="cpu"):
     scale_0 = scale_0[:, :, None, None]
 
     var = scale_t - scale_0
-    mean = log_x0 - 0.5 * var
+    # mean = log_x0 - 0.5 * var
+    mean = log_x0
     log_xt = mean + torch.sqrt(var) * noise
+    # log_xt = torch.clamp(log_xt, 0, np.log(2)) # clip to valid range
     return log_xt.to(device), noise, var
 
 
@@ -106,10 +106,11 @@ def one_step_denoising(
 
     var = scale_t - scale_0
     var_t = scale_t - scale_t_prev
-    mean = x + 0.5 * var_t
+    # mean = x + 0.5 * var_t
+    mean = x
 
     x_out = mean + var_t/torch.sqrt(var) * noise_pred + torch.sqrt(var_t) * z
-    x_out = torch.clamp(x_out, 0, np.log(2))  # clip to valid range
+    # x_out = torch.clamp(x_out, 0, np.log(2))  # clip to valid range
 
     return x_out.to(device)
 
@@ -122,12 +123,12 @@ def sample_noise_removal(
     sigmas: torch.Tensor,
     device: str = "cpu",
 ):
-    # x = torch.randn_like(x_0).to(device)
     x = x_0
     for t_ in tqdm.tqdm(reversed(range(timesteps - 1)), total=timesteps - 1):
         t = torch.ones(size=(x.shape[0], 1), dtype=int) * t_
         t = t.to(device)
         x = one_step_denoising(model, x, t, sigmas, device=device)
+    # x = torch.clamp(x, 0, np.log(2))
     return x
 
 
@@ -164,11 +165,13 @@ if __name__ == "__main__":
     # loader = DataLoader(data, batch_size=batch_size, shuffle=True, num_workers=5, drop_last=True)
 
     # # Init dataset celeba
-    batch_size = 8
-    data_transform = celeba_data_transform(224)
+    img_size = 128
+    batch_size = 28
+    data_transform = celeba_data_transform(img_size)
     data = CelebADataset(
         # img_dir="/nfs/stak/users/vuonga2/datasets/img_celeba",
-        img_dir="/nfs/stak/users/vuonga2/datasets/img_celeba_small",
+        img_dir="/nfs/stak/users/vuonga2/datasets/img_celeba_tiny",
+        # img_dir="/nfs/stak/users/vuonga2/datasets/img_celeba_small",
         transform=data_transform,
     )
     loader = DataLoader(
@@ -195,7 +198,7 @@ if __name__ == "__main__":
         "out_channels": 1,
         "num_res_blocks": 2,
         "attn_resolutions": (16,),
-        "input_img_resolution": 224,
+        "input_img_resolution": img_size,
         "channels_multipliers": (1, 1, 2, 2, 4, 4),
     }
     model = UNet(**unet_conf).to(device)
@@ -204,7 +207,7 @@ if __name__ == "__main__":
     print("Model initialized, total params = ", total_params)
 
     # Init diffusion params
-    T = 500
+    T = 1000
     sigmas = get_noise_schedule(T)
     # repeat into batch_size for easier indexing by t
     sigmas = sigmas.unsqueeze(0).repeat(batch_size, 1).to(device)
@@ -218,7 +221,7 @@ if __name__ == "__main__":
     t = torch.randint(low=1, high=T, size=(batch_size, 1))
     print(x.shape)
     # Exp name
-    exp_name = "celeba-small-noise-removal"
+    exp_name = f"celeba-tiny-noise-removal-{img_size}-test"
     if not os.path.exists(os.path.join("models", exp_name)):
         os.makedirs(os.path.join("models", exp_name))
     if not os.path.exists(f"./sampling_images/{exp_name}"):
@@ -233,20 +236,22 @@ if __name__ == "__main__":
 
     # train params
     epochs = 100
+    save_every = 1
     start_epoch = 0
-    load_epoch = start_epoch - 1
-    load_model = False
+    # load_epoch = start_epoch - 1
+    load_model = True
+    # load_model_path = f"models/{exp_name}/model_{load_epoch}.pkl"
+    load_model_path = "models/celeba-tiny-noise-removal-128/second-run/model_99.pkl"
 
-    # # load from save
-    # if load_model:
-    #     print(f"loading model from epoch {load_epoch}")
-    #     model.load_state_dict(
-    #         torch.load(
-    #             f"models/celeba-noise-removal/model_{load_epoch}.pkl",
-    #             map_location=device,
-    #         )
-    #     )
-    # start_epoch = 0
+    # load from save
+    if load_model:
+        print(f"loading model from epoch {load_model_path}")
+        model.load_state_dict(
+            torch.load(
+                load_model_path,
+                map_location=device,
+            )
+        )
 
     # re-init dataloader
     # loader = DataLoader(data, batch_size=batch_size, drop_last=True)
@@ -258,6 +263,7 @@ if __name__ == "__main__":
     lr = 1e-6
     opt = torch.optim.Adam(model.parameters(), lr=lr)
     # lr_schedule = LinearLR(opt, total_iters=epochs)
+    lr_schedule = ReduceLROnPlateau(opt, mode="min", patience=5, factor=0.5)
     opt.zero_grad()
 
     # TODO: currently loss keeps increasing with epochs, shit is happening
@@ -272,6 +278,7 @@ if __name__ == "__main__":
             "epochs": epochs,
             "start_epoch": start_epoch,
             "unet_config": unet_conf,
+            "num_steps": T,
         },
     )
 
@@ -279,16 +286,14 @@ if __name__ == "__main__":
     for e in np.arange(start_epoch, start_epoch + epochs):
         loss_ema = None
         pbar = tqdm.tqdm(enumerate(loader), total=total)
-        for idx, x in pbar:
-            x = x[0]
-            x = x.to(device)
+        for idx, log_x in pbar:
+            log_x = log_x[0]
+            log_x = log_x.to(device)
             t = torch.randint(low=0, high=T, size=(batch_size, 1)).to(device)
 
             log_x_in, noise_in, var_in = forward_diffusion_gbm(
-                x, t, sigmas, device=device
+                log_x, t, sigmas, device=device
             )
-            # x_in, noise_in = forward_diffusion(x, t, alphas_cum, device=device)
-            # x_out = forward_diffusion(x, t, alphas_cum, device=device)
 
             noise_pred = model(log_x_in, t.squeeze())
             loss = torch.nn.functional.mse_loss(noise_in, noise_pred, reduction="mean")
@@ -312,42 +317,34 @@ if __name__ == "__main__":
             #     break
 
         # linear lrate decay
-        opt.param_groups[0]["lr"] = lr * (1 - e / epochs)
-        # lr_schedule.step()
+        # opt.param_groups[0]["lr"] = lr * (1 - e / epochs)
+        lr_schedule.step(loss)
 
         print(f"epoch {e} loss={loss.item()}")
-        if e % 1 == 0:
-            save_model(f"models/{exp_name}/model_{e}.pkl", model)
 
         # show image and save model every 100 epochs
-        if e % 1 == 0:
+        if e % save_every == 0 or e == epochs-1:
+            save_model(f"models/{exp_name}/model_{e}.pkl", model)
             print("Generating sample images")
-            save_image_2(x, f"sampling_images/{exp_name}/original_epoch_{e}.png")
-            x_noised = torch.exp(log_x_in)
+            x_org = torch.exp((log_x+1)*np.log(2)/2)
+            save_image_2(torch.exp(x), f"sampling_images/{exp_name}/original_epoch_{e}.png")
+            x_noised = torch.exp((log_x_in+1)*np.log(2)/2)
             save_image_2(x_noised, f"sampling_images/{exp_name}/noised_epoch_{e}.png")
             xs = []
-            for j in range(batch_size):
-                # x_in = torch.ones(16, *x.shape[1:])
-                x_in = log_x_in[j]
-                x_in = x_in[None, :, :, :]
-                # print(x_in.shape)
+            for j in range(4): # use 4 images only
+                log_x0 = log_x_in[j]
+                log_x0 = log_x0[None, :, :, :]
                 K = t[j][0].to("cpu").item()
-                x_denoised = sample_noise_removal(
-                    x_in,
+                log_x_denoised = sample_noise_removal(
+                    log_x0,
                     model,
                     K,
                     sigmas,
                     device=device,
                 )
+                x_denoised = torch.exp((log_x_denoised+1)*np.log(2)/2)
                 x_denoised = x_denoised.to("cpu")
-                x_denoised = torch.exp(x_denoised)
                 xs.append(x_denoised)
-            xs = torch.cat(xs)
-            # show_images_batch(
-            #     f"sampling_images/{exp_name}/sample_epoch_{e}.png", x_denoised
-            # )
-            # show_images_batch(f"sampling_images/{exp_name}/latest.png", x_denoised)
-            save_image(xs, f"sampling_images/{exp_name}/sample_epoch_{e}.png")
-            save_image(xs, f"sampling_images/{exp_name}/latest.png")
-            wandb.save(f"sampling_images/{exp_name}/*.png")
-            save_model(f"models/{exp_name}/model.pkl", model)
+            xsout = torch.cat(xs)
+            save_image_2(xsout, f"sampling_images/{exp_name}/sample_epoch_{e}.png")
+            save_image_2(xsout, f"sampling_images/{exp_name}/latest.png")

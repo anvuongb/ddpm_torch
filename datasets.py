@@ -69,6 +69,8 @@ def celeba_data_transform(img_size=224):
         # transforms.ToTensor(),
         transforms.Lambda(lambda t: t / 255),  # scale to [0, 1]
         transforms.Lambda(lambda t: t + 1),  # Scale between [1, 2] for log
+        transforms.Lambda(lambda t: torch.log(t)), # now image in range [0, log2]
+        transforms.Lambda(lambda t: t*2/np.log(2) - 1 ) # now image in range [-1,1]
         # transforms.Lambda(lambda t: (t * 2) - 1) # Scale between [-1, 1]
     ]
     transform = transforms.Compose(transform)
