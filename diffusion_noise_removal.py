@@ -5,7 +5,6 @@ import os
 from unet_simple import UNetSimple
 import torch.functional as F
 from torch.utils.data import DataLoader
-from torch.utils.tensorboard import writer
 from torchvision.datasets import MNIST
 from torchvision.utils import save_image, make_grid
 import torch
@@ -74,8 +73,8 @@ def forward_diffusion_gbm(log_x0, t, sigmas, device="cpu"):
     scale_0 = scale_0[:, :, None, None]
 
     var = scale_t - scale_0
-    # mean = log_x0 - 0.5 * var
-    mean = log_x0
+    mean = log_x0 - 0.5 * var
+    # mean = log_x0
     log_xt = mean + torch.sqrt(var) * noise
     # log_xt = torch.clamp(log_xt, 0, np.log(2)) # clip to valid range
     return log_xt.to(device), noise, var
@@ -85,7 +84,7 @@ def forward_diffusion_gbm(log_x0, t, sigmas, device="cpu"):
 @torch.no_grad()
 def one_step_denoising(
     model,
-    x,
+    log_x,
     t,
     sigmas,
     device="cpu",
@@ -99,20 +98,20 @@ def one_step_denoising(
     scale_t_prev = torch.gather(sigmas, 1, t)
     scale_t_prev = scale_t_prev[:, :, None, None]
 
-    z = torch.randn_like(x)
+    z = torch.randn_like(log_x)
 
-    noise_pred = model(x, t[0])
+    noise_pred = model(log_x, t[0])
     noise_pred = torch.clamp(noise_pred, -1, 1)
 
     var = scale_t - scale_0
     var_t = scale_t - scale_t_prev
-    # mean = x + 0.5 * var_t
-    mean = x
+    mean = log_x + 0.5 * var_t
+    # mean = log_x
 
-    x_out = mean + var_t/torch.sqrt(var) * noise_pred + torch.sqrt(var_t) * z
-    # x_out = torch.clamp(x_out, 0, np.log(2))  # clip to valid range
+    log_x_out = mean + var_t/torch.sqrt(var) * noise_pred + torch.sqrt(var_t) * z
+    # log_x_out = torch.clamp(log_x_out, 0, np.log(2))  # clip to valid range
 
-    return x_out.to(device)
+    return log_x_out.to(device)
 
 
 @torch.no_grad()
@@ -170,12 +169,12 @@ if __name__ == "__main__":
     data_transform = celeba_data_transform(img_size)
     data = CelebADataset(
         # img_dir="/nfs/stak/users/vuonga2/datasets/img_celeba",
-        img_dir="/nfs/stak/users/vuonga2/datasets/img_celeba_tiny",
-        # img_dir="/nfs/stak/users/vuonga2/datasets/img_celeba_small",
+        # img_dir="/nfs/stak/users/vuonga2/datasets/img_celeba_tiny",
+        img_dir="/root/datasets/img_celeba_small",
         transform=data_transform,
     )
     loader = DataLoader(
-        data, batch_size=batch_size, shuffle=True, num_workers=5, drop_last=True
+        data, batch_size=batch_size, shuffle=True, num_workers=10, drop_last=True
     )
 
     # Init model
@@ -221,25 +220,20 @@ if __name__ == "__main__":
     t = torch.randint(low=1, high=T, size=(batch_size, 1))
     print(x.shape)
     # Exp name
-    exp_name = f"celeba-tiny-noise-removal-{img_size}-test"
+    exp_name = f"celeba-small-noise-removal-2-{img_size}"
     if not os.path.exists(os.path.join("models", exp_name)):
         os.makedirs(os.path.join("models", exp_name))
     if not os.path.exists(f"./sampling_images/{exp_name}"):
         os.makedirs(f"./sampling_images/{exp_name}")
     # init tensorboard writer
     current_time = time.time()
-    # tb_writer = writer.SummaryWriter(f"logdir/{exp_name}_{current_time}")
-    tb_writer = writer.SummaryWriter(f"logdir/{exp_name}")
-    tb_writer.add_graph(
-        model=model, input_to_model=[x.to(device), t.squeeze().to(device)]
-    )
 
     # train params
-    epochs = 100
-    save_every = 1
+    epochs = 500
+    save_every = 10
     start_epoch = 0
     # load_epoch = start_epoch - 1
-    load_model = True
+    load_model = False
     # load_model_path = f"models/{exp_name}/model_{load_epoch}.pkl"
     load_model_path = "models/celeba-tiny-noise-removal-128/second-run/model_99.pkl"
 
@@ -263,7 +257,7 @@ if __name__ == "__main__":
     lr = 1e-6
     opt = torch.optim.Adam(model.parameters(), lr=lr)
     # lr_schedule = LinearLR(opt, total_iters=epochs)
-    lr_schedule = ReduceLROnPlateau(opt, mode="min", patience=5, factor=0.5)
+    lr_schedule = ReduceLROnPlateau(opt, mode="min", patience=5, factor=0.75)
     opt.zero_grad()
 
     # TODO: currently loss keeps increasing with epochs, shit is happening
@@ -298,7 +292,6 @@ if __name__ == "__main__":
             noise_pred = model(log_x_in, t.squeeze())
             loss = torch.nn.functional.mse_loss(noise_in, noise_pred, reduction="mean")
             loss.backward()
-            tb_writer.add_scalar("loss", loss.item(), e * total + idx)
 
             if loss.item() == torch.nan:
                 raise Exception("loss becomes nan")
@@ -318,6 +311,7 @@ if __name__ == "__main__":
 
         # linear lrate decay
         # opt.param_groups[0]["lr"] = lr * (1 - e / epochs)
+        wandb.log({"learning_rate":opt.param_groups[-1]["lr"]})
         lr_schedule.step(loss)
 
         print(f"epoch {e} loss={loss.item()}")
@@ -327,7 +321,7 @@ if __name__ == "__main__":
             save_model(f"models/{exp_name}/model_{e}.pkl", model)
             print("Generating sample images")
             x_org = torch.exp((log_x+1)*np.log(2)/2)
-            save_image_2(torch.exp(x), f"sampling_images/{exp_name}/original_epoch_{e}.png")
+            save_image_2(torch.exp(x_org), f"sampling_images/{exp_name}/original_epoch_{e}.png")
             x_noised = torch.exp((log_x_in+1)*np.log(2)/2)
             save_image_2(x_noised, f"sampling_images/{exp_name}/noised_epoch_{e}.png")
             xs = []
