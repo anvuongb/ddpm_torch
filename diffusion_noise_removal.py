@@ -321,7 +321,7 @@ if __name__ == "__main__":
             save_model(f"models/{exp_name}/model_{e}.pkl", model)
             print("Generating sample images")
             x_org = torch.exp((log_x+1)*np.log(2)/2)
-            save_image_2(torch.exp(x_org), f"sampling_images/{exp_name}/original_epoch_{e}.png")
+            save_image_2(x_org, f"sampling_images/{exp_name}/original_epoch_{e}.png")
             x_noised = torch.exp((log_x_in+1)*np.log(2)/2)
             save_image_2(x_noised, f"sampling_images/{exp_name}/noised_epoch_{e}.png")
             xs = []
